@@ -303,6 +303,21 @@ function renameToLegacyNaming() {
 }
 
 /**
+ * 【手動実行用・年1回】次の年度のスプレッドシートを先に準備しておく(2026-08-15新設)。
+ * 通常は年度が変わった直後に最初にアクセスした人(ダッシュボード表示 or 不具合入力)が
+ * 自動作成のきっかけになり、setupQualityDefectSystemFor_(不良12シート等の組み立て、前年度の
+ * CC/KP/SK台帳等のコピー)に数分かかって重く感じられてしまう。5月末など年度が変わる少し前に
+ * この関数を実行しておけば、その重い処理を事前に済ませておけるため、6月1日以降の実際の
+ * アクセスはいつも通りの速さで動く。既に来年度のファイルがある場合は何もしない(毎年5月末に
+ * 実行する運用でよく、何度実行しても安全)。
+ */
+function prepareNextYearSpreadsheet() {
+  var nextYear = getCurrentFiscalYear_() + 1;
+  var ss = getOrCreateYearSpreadsheet_(nextYear);
+  Logger.log('次年度(' + nextYear + '年度)のスプレッドシートを準備しました: ' + ss.getUrl());
+}
+
+/**
  * 【手動実行用】DEFECT_ITEMSマスタ(不良項目)を更新した後に実行する。
  * setupQualityDefectSystemと違い、既存の「不良〇月」シートのデータ(6月・7月の移行分など)は
  * 一切消さず、M列のプルダウンの選択肢だけを新しいDEFECT_ITEMSに差し替える。
