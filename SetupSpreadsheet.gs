@@ -318,6 +318,71 @@ function prepareNextYearSpreadsheet() {
 }
 
 /**
+ * トリガー用ハンドラ(2026-08-15新設)。GASの時間主導型トリガーには「年1回」という設定が無いため、
+ * 毎月25日に実行されるトリガーを設置し、この関数側で「5月かどうか」を判定して年1回に絞る方式にした
+ * (6月の年度切り替わりの少し前、5月に1回だけ実際にprepareNextYearSpreadsheetを実行する)。
+ */
+function autoPrepareNextYearSpreadsheet() {
+  var month = new Date().getMonth() + 1;
+  if (month !== 5) return; // 5月以外は何もしない
+  prepareNextYearSpreadsheet();
+}
+
+/**
+ * 【手動実行用・1回だけ】毎月25日午前3時台にautoPrepareNextYearSpreadsheetを自動実行するトリガーを
+ * 設置する(2026-08-15新設)。これを1回実行しておけば、以後は`prepareNextYearSpreadsheet`を毎年
+ * 手動実行する必要が無くなる(5月に自動で次年度分の準備が走る)。既に同じ関数のトリガーがあれば
+ * 重複作成しない(何度実行しても安全)。
+ * 【注意】このプロジェクトで初めてトリガーを作成する場合、実行時に「承認が必要です」の画面が
+ * 出ることがある(トリガー作成用の権限を新たに使うため)。出たら許可すること。
+ */
+function installPrepareNextYearTrigger() {
+  var already = ScriptApp.getProjectTriggers().some(function (t) {
+    return t.getHandlerFunction() === 'autoPrepareNextYearSpreadsheet';
+  });
+  if (already) {
+    Logger.log('既にトリガーが設定されています(重複作成はしません)。');
+    return;
+  }
+  ScriptApp.newTrigger('autoPrepareNextYearSpreadsheet')
+    .timeBased()
+    .onMonthDay(25)
+    .atHour(3)
+    .create();
+  Logger.log('毎月25日の午前3時台に自動チェックするトリガーを設置しました。実際に次年度分を準備するのは5月だけです。');
+}
+
+/**
+ * 【手動実行用・診断】設置されているトリガーの一覧を確認する(2026-08-15新設)。
+ */
+function listTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  if (triggers.length === 0) {
+    Logger.log('トリガーは1つも設置されていません。');
+    return;
+  }
+  var log = triggers.map(function (t, i) {
+    return (i + 1) + '. 関数「' + t.getHandlerFunction() + '」 種類=' + t.getEventType() + ' トリガー元=' + t.getTriggerSource();
+  });
+  Logger.log(log.join('\n'));
+}
+
+/**
+ * 【手動実行用】installPrepareNextYearTriggerで設置したトリガーを削除する(2026-08-15新設)。
+ */
+function removePrepareNextYearTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  triggers.forEach(function (t) {
+    if (t.getHandlerFunction() === 'autoPrepareNextYearSpreadsheet') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  Logger.log(removed + '件のトリガーを削除しました。');
+}
+
+/**
  * 【手動実行用】DEFECT_ITEMSマスタ(不良項目)を更新した後に実行する。
  * setupQualityDefectSystemと違い、既存の「不良〇月」シートのデータ(6月・7月の移行分など)は
  * 一切消さず、M列のプルダウンの選択肢だけを新しいDEFECT_ITEMSに差し替える。
