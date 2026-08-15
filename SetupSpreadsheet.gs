@@ -228,7 +228,59 @@ function getOrCreateYearSpreadsheet_(fiscalYear) {
     if (s && newSs.getSheets().length > 1) newSs.deleteSheet(s);
   });
 
+  // 前年度のCC/KP/SK台帳(手作業で旧システム形式に作り直したもの)・データ・サプライヤー不具合シートを
+  // 構造・プルダウンだけ引き継ぐ(2026-08-15、ユーザー合意)。前年度が無ければ諦めて空のまま進める。
+  try {
+    var prevSs = getOrCreateYearSpreadsheet_(fiscalYear - 1);
+    copyCurrentStructureSheets_(prevSs, newSs);
+  } catch (err) {
+    Logger.log('前年度シートの引き継ぎに失敗しました(手動での確認が必要): ' + err.message);
+  }
+
   return newSs;
+}
+
+/**
+ * 新年度作成時に「構造・プルダウンだけ引き継ぎ、入力済みデータは空にする」対象のシート(2026-08-15新設)。
+ * 客先クレーム管理台帳(CC)・社内不良管理台帳(品証)(KP)・社内不良管理台帳(製造工程)(SK)は、
+ * ユーザーが2026-08-15に旧システム形式(結合セルを含む複数行ヘッダー)で手作業で作り直したため、
+ * コードで再現せずシートをそのままコピーする方式にしている。
+ * 「データ」は年月日・不良項目名等のプルダウン用マスタ(年度が変わっても内容ごと引き継ぐべき参照データ)
+ * のため、clearDataをfalseにして中身もそのままコピーする。
+ * 「サプライヤー不具合」は固定行数(フリーズ)が設定されていないため、見出し行数を2行(タイトル行＋
+ * 項目名行)に決め打ちしている(2026-08-15時点の実際の構成から確認した値)。手動で構成を変えた場合は
+ * この値も見直すこと。
+ */
+var COPY_STRUCTURE_SHEETS_ = [
+  { name: '客先クレーム管理台帳(CC)', clearData: true },
+  { name: '社内不良管理台帳(品証)(KP)', clearData: true },
+  { name: '社内不良管理台帳(製造工程)(SK)', clearData: true },
+  { name: 'データ', clearData: false },
+  { name: 'サプライヤー不具合', clearData: true, headerRowsOverride: 2 }
+];
+
+function copyCurrentStructureSheets_(sourceSs, targetSs) {
+  var log = [];
+  COPY_STRUCTURE_SHEETS_.forEach(function (cfg) {
+    var source = sourceSs.getSheetByName(cfg.name);
+    if (!source) { log.push(cfg.name + ': コピー元に見つからないためスキップ'); return; }
+    if (targetSs.getSheetByName(cfg.name)) { log.push(cfg.name + ': 既にあるためスキップ'); return; }
+
+    var copied = source.copyTo(targetSs);
+    copied.setName(cfg.name); // copyToは「〇〇のコピー」という名前になるため、元の名前に揃える
+    if (source.isSheetHidden()) copied.hideSheet();
+
+    if (cfg.clearData) {
+      var headerRows = cfg.headerRowsOverride || source.getFrozenRows();
+      var lastRow = copied.getMaxRows();
+      var lastCol = copied.getMaxColumns();
+      if (headerRows > 0 && lastRow > headerRows) {
+        copied.getRange(headerRows + 1, 1, lastRow - headerRows, lastCol).clearContent();
+      }
+    }
+    log.push(cfg.name + ': コピーしました' + (cfg.clearData ? '(見出し行より下のデータはクリア)' : '(内容もそのまま引き継ぎ)'));
+  });
+  Logger.log(log.join('\n'));
 }
 
 /** 現在の年度(今日の日付基準)のスプレッドシートを返す(無ければ自動作成)。dateを省略すると今日の日付を使う。 */
@@ -424,6 +476,27 @@ function addManufacturingNumberColumn() {
     log.push('不良' + month + '月: 製造番号列を追加しました');
   });
   SpreadsheetApp.flush();
+  Logger.log(log.join('\n'));
+}
+
+/**
+ * 【診断用・手動実行】現在の年度のスプレッドシートに実際にあるシートを一覧表示する(2026-08-15新設)。
+ * ユーザーが直接シートを追加・変更した場合に、コード側(setupQualityDefectSystemFor_等)が把握している
+ * 構成とのズレを確認するために使う。シート名・表示/非表示・行数・列数をログに出す。
+ */
+function listAllSheets() {
+  var ss = getCurrentYearSpreadsheet_();
+  var log = ['スプレッドシート: ' + ss.getName()];
+  ss.getSheets().forEach(function (sheet, i) {
+    var lastRowWithData = sheet.getLastRow();
+    log.push(
+      (i + 1) + '. 「' + sheet.getName() + '」' +
+      (sheet.isSheetHidden() ? '(非表示)' : '(表示)') +
+      ' 行数=' + sheet.getMaxRows() + ' 列数=' + sheet.getMaxColumns() +
+      ' 固定行数=' + sheet.getFrozenRows() +
+      ' データ最終行=' + lastRowWithData
+    );
+  });
   Logger.log(log.join('\n'));
 }
 
@@ -1144,9 +1217,11 @@ function buildCcLedgerSheet_(ss, masters) {
     '機械名(機械番号)': masters.kishu,
     '加工指示・改善の実施 担当(加工者)': masters.kakosha
   };
-  var sheet = buildImprovementLedgerSheet_(ss, '客先クレーム管理台帳(CC)', leftHeaders, dropdownCols,
+  var sheet = buildImprovementLedgerSheet_(ss, '客先クレーム管理台帳(CC)仮', leftHeaders, dropdownCols,
     { qty: 'NG数(納入数)', unitPrice: '単価', amount: '金額' });
-  sheet.hideSheet(); // 2026-08-12: 3台帳とも方針未確定のため、方針が決まるまで非表示にしておく(元データをそのまま使う運用)
+  sheet.hideSheet(); // 2026-08-12: 3台帳とも方針未確定のため非表示にしておく。2026-08-15: ユーザーが手作業で
+  // 旧システム形式の本物(「客先クレーム管理台帳(CC)」、仮の付かない名前)を別途作成したため、名前の衝突を
+  // 避けるためこちら(コード生成の簡易版)は「仮」を付けて区別する。ユーザーの希望でこちらも作成は継続する。
 }
 
 /** 社内不良管理台帳(品証)(KP)。品証の検査で見つかった社内不良の改善計画書進捗を管理する(不良〇月とは別の台帳) */
@@ -1163,9 +1238,9 @@ function buildKpQualityLedgerSheet_(ss, masters) {
     '機械名(機械番号)': masters.kishu,
     '加工指示・改善の実施 担当(加工者)': masters.kakosha
   };
-  var sheet = buildImprovementLedgerSheet_(ss, '社内不良管理台帳(品証)(KP)', leftHeaders, dropdownCols,
+  var sheet = buildImprovementLedgerSheet_(ss, '社内不良管理台帳(品証)(KP)(仮)', leftHeaders, dropdownCols,
     { qty: '不良数(加工数)', unitPrice: '単価', amount: '金額' });
-  sheet.hideSheet(); // 2026-08-12: 3台帳とも方針未確定のため、方針が決まるまで非表示にしておく(元データをそのまま使う運用)
+  sheet.hideSheet(); // 2026-08-15: 名前の衝突回避のため「仮」を付けている(buildCcLedgerSheet_のコメント参照)
 }
 
 /** 社内不良管理台帳(製造工程)(SK)。加工者自身がその場で申告する工程内不良の改善計画書進捗を管理する */
@@ -1182,8 +1257,8 @@ function buildSkProcessLedgerSheet_(ss, masters) {
     '機械名(機械番号)': masters.kishu,
     '加工指示・改善の実施 担当(加工者)': masters.kakosha
   };
-  var sheet = buildImprovementLedgerSheet_(ss, '社内不良管理台帳(製造工程)(SK)', leftHeaders, dropdownCols, null);
-  sheet.hideSheet(); // 2026-08-12: 3台帳とも方針未確定のため、方針が決まるまで非表示にしておく(元データをそのまま使う運用)
+  var sheet = buildImprovementLedgerSheet_(ss, '社内不良管理台帳(製造工程)(SK)(仮)', leftHeaders, dropdownCols, null);
+  sheet.hideSheet(); // 2026-08-15: 名前の衝突回避のため「仮」を付けている(buildCcLedgerSheet_のコメント参照)
 }
 
 /** 既存の同名シートを削除してから新規作成する */
