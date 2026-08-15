@@ -187,6 +187,16 @@ aliases:
 - `reportMonthIndex()`(新設)で今日の日付から対象月のインデックスを算出し、その1つ前(前月)を表示対象にする。年度最初の月(6月)を見ている場合だけ「前月」が前年度分(データ無し)になるため、その月自体を表示するフォールバックあり。
 - **タイルのラベルにも対象月名を明示**(「今月 不良個数」→「7月 不良個数」のように)。今後同じ勘違いが起きないよう、どの月のデータかが一目で分かるようにした。「社内不良(KP)比率」タイルは年計値のため「社内不良(KP)比率(年計)」に文言変更。
 
+### ⑬ GASプロジェクトをclasp+GitHubで管理(2026-08-15新設)
+これまでGASコードの変更は「ローカルの.gsファイルを編集→内容を丸ごとコピーしてGASエディタに貼り替え」という手作業だったが、ユーザー指示で[[reference_clasp-gas-github-workflow]]の手法([[project_kintai-nishikaru-handover]]で先行実績あり)を導入し、GitHub経由での管理に切り替えた。
+- **スクリプトID**: `1hP7RnPp4bH_WbyuXoTU0tarqbtFejwWl21fUlqMUkhjoY9gaNwi9flHd`(このフォルダ直下の`.clasp.json`に設定済み)
+- **新規GitHubリポジトリ**: [`n-moriizumi-blip/nishikaru-fuguai-gas`](https://github.com/n-moriizumi-blip/nishikaru-fuguai-gas)(public)。このフォルダ自体を`git init`してpush済み(コミット`c38fd2a`)。`index.html`・`dashboard.html`は別リポジトリ(`nishikaru-kensa-app`・`nishikaru-fuguai-dashboard`)で管理しているため`.gitignore`で除外し、こちらには含めない。
+- **`.clasp.json`**: `scriptExtensions: [".js", ".gs"]`により既存の`.gs`ファイルをそのままclasp管理対象にできる([[project_kintai-nishikaru-handover]]の`勤怠管理システム`フォルダと同じ設定)。`.claspignore`は`**/**`→`!*.gs`・`!appsscript.json`のホワイトリスト方式で、`.html`・`CLAUDE.md`等はGASプロジェクトへ誤ってpushされないようにしている。
+- **導入時の検証**: `clasp clone`で本番コードを取得し、ローカルの`.gs`ファイルと`diff`した結果、`SetupSpreadsheet.gs`・`WebApi.gs`は完全一致(=これまでの手動貼り替え運用は正しく反映されていた)。`MigrateOldData.gs`だけコメント1行分のズレがあり(2026-08-13にローカル側だけ更新してGASへの反映を忘れていた)、`clasp push`で解消した。
+- **【重要な注意点】`clasp pull`は既存の`.gs`ファイルと同名でも`.js`拡張子で新規ファイルを作ってしまう**(実際に発生・削除して対処済み)。今後`clasp pull`を使う場合は、pull後に同名`.js`が重複生成されていないか必ず確認し、あれば内容を比較の上で`.js`側を削除すること。`clasp push`(ローカル→GAS)はこの問題が起きない。
+- **【重要な注意点】`clasp push`はGASプロジェクトの中身(コード)を更新するだけで、WebApi.gsが提供するWebアプリの「デプロイ」バージョンは更新されない**。`SetupSpreadsheet.gs`・`MigrateOldData.gs`(GASエディタで手動実行する関数群)への変更は`clasp push`だけで即座に有効になるが、`WebApi.gs`(`doGet`/`doPost`)への変更を実際のWebアプリURLに反映するには、これまで通りGASエディタの「デプロイを管理」→既存デプロイを「新しいバージョン」で再デプロイする操作が別途必要(`clasp deploy`コマンドもあるが今回は未使用・未検証)。
+- **今後の運用**: コード変更時は「ローカルの`.gs`を編集→(必要なら)`git commit`&`git push`でGitHubへ反映→`clasp push`でGASへ反映→WebApi.gs変更時のみ追加で手動デプロイ」という流れになる。GASエディタへの手貼り替えは基本的に不要になった。
+
 ## 5. 未確定事項
 - **【2026-08-12・大きめの検討事項】改善計画書(なぜなぜ分析〜水平展開)のアプリ化をユーザーが提起**。現状把握のため「改善計画書台帳」フォルダ(ID `1zWL_FZ_yMjx5pTDyK6fdQf0Tdkf-wvrC`)を調査したところ、想定より本格的なQMS帳票と判明: テンプレートは「不適合改善計画書テンプレート NPL60FG-20」(品質文書として改訂履歴管理、ID `19Mt-iw4yrkIfqS3yDmHScsQcSrBXIJaN3HbvwqTayTw`)、発生状況→現物処置→調査結果(なぜなぜ分析・特性要因図)→恒久策(発生対策/流出対策)→水平展開→仕組みへの反映→是正完了後の確認→有効性確認(3ヶ月後 or 3ロット後)という多段階承認フロー(作成者→上原さん等の承認→効果確認→水平展開)を持つ。現状は「(CC)客先クレーム改善計画書」「(KP)社内不良改善計画書」フォルダ配下に案件ごとのサブフォルダ(テンプレコピー＋証拠写真)を作る運用で、全CC/KP案件のうち該当するものだけ作成(多くは「改善計画書対象外」)。ユーザーとは「まず合意済みのグラフ実装(⑧)を完了させ、アプリ化の方針は別途後日あらためて検討する」ことで合意済み(2026-08-12)。着手時は改めてスコープ(Phase分け・承認フローのデジタル化範囲等)を協議すること。
 - 送信(action=submit)の実機での一連の動作テストがまだ済んでいない(ログイン→QRスキャン→フォーム入力(単価・詳細・キズ原因含む)→送信→シートへの反映確認)
