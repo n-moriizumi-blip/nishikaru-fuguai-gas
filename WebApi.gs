@@ -340,19 +340,19 @@ function buildDashboardData_() {
     }
   }
 
-  // --- 不良〇月シート12枚: 得意先別金額・設備別個数・月別加工数合計(不良率の分母) ---
+  // --- 不良〇月シート12枚: 得意先別金額・加工者別件数・月別加工数合計(不良率の分母) ---
   var customerAmount = {}; // { 得意先名: 金額合計 }
-  var machineQty = {};     // { 機種名: 不良個数合計 }
+  var workerDefectCount = {}; // { 加工者: 不良件数(行数、追加行は加工者が空欄のため二重カウントされない) }
   var monthlyVolume = [];  // 月別 加工数合計
 
   MONTHS.forEach(function (month) {
     var sheet = ss.getSheetByName('不良' + month + '月');
-    var rows = sheet.getRange(2, 1, 114, 18).getValues(); // A〜R列(E得意先名/H機種名/J加工数/L不良数計/R金額)
+    var rows = sheet.getRange(2, 1, 114, 18).getValues(); // A〜R列(E得意先名/G加工者/J加工数/L不良数計/R金額)
     var volume = 0;
     rows.forEach(function (row) {
-      var customer = row[4], machine = row[7], suryo = row[9], qtyTotal = row[11], amount = row[17];
+      var customer = row[4], worker = row[6], suryo = row[9], amount = row[17];
       if (suryo) volume += Number(suryo) || 0;
-      if (machine && qtyTotal) machineQty[machine] = (machineQty[machine] || 0) + (Number(qtyTotal) || 0);
+      if (worker) workerDefectCount[worker] = (workerDefectCount[worker] || 0) + 1;
       if (customer && amount) customerAmount[customer] = (customerAmount[customer] || 0) + (Number(amount) || 0);
     });
     monthlyVolume.push(volume);
@@ -387,7 +387,7 @@ function buildDashboardData_() {
     causeGroups: causeGroups,
     causeTotals: causeTotals,
     customers: topN(customerAmount, 8),
-    machines: topN(machineQty, 8),
+    workers: topN(workerDefectCount, 8),
     defectRate: defectRate,
     kpReworkRatio: kpReworkRatio,
     claimMonthly: claimMonthly,
