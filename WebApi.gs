@@ -363,6 +363,7 @@ function buildDashboardData_() {
     return v > 0 ? Math.round((monthlyQty[mi] / v) * 1000) / 10 : 0;
   });
 
+  // KPIタイル「社内不良(KP)比率(年計)」でのみ使う(2026-08-17、単独グラフ「社内不良(KP)と差し戻しの比率」は削除済み)
   var kpReworkTotal = kpQtyYear + reworkQtyYear;
   var kpReworkRatio = kpReworkTotal > 0 ? [
     { label: '社内不良(KP)', value: Math.round((kpQtyYear / kpReworkTotal) * 1000) / 10 },

@@ -304,6 +304,64 @@ function exportChartsAsImages() {
 }
 
 /**
+ * 【調査用・書き込みなし】本物のCC/KP/SK台帳3枚(客先クレーム管理台帳(CC)・社内不良管理台帳(品証)(KP)・
+ * 社内不良管理台帳(製造工程)(SK))の見出し行を走査し、「日」を含む見出し(発生日・完了日等)の列について、
+ * データ行1行目の入力規則(プルダウン設定の有無)・表示形式・結合状態をログに出す(2026-08-17新設)。
+ * ユーザーから「年月日の入力がプルダウンになっているのを、ダブルクリックでカレンダー入力できる
+ * ようにしたい」との依頼を受け、現状の設定(本当にリスト形式のプルダウンなのか、単なる日付書式なのか)
+ * を実物で確認してから対応方針を決めるための調査用。
+ */
+function debugInspectDateColumnValidation() {
+  var ss = getCurrentYearSpreadsheet_();
+  var sheetNames = [CC_LEDGER_SHEET_NAME, '社内不良管理台帳(品証)(KP)', '社内不良管理台帳(製造工程)(SK)'];
+  var log = [];
+
+  sheetNames.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) { log.push('【' + name + '】シートが見つかりません'); return; }
+
+    var frozen = sheet.getFrozenRows();
+    var lastCol = sheet.getLastColumn();
+    var dataRow = frozen + 1;
+    log.push('【' + name + '】固定行数=' + frozen + '(データ開始行=' + dataRow + ')、最終列=' + lastCol);
+
+    var headerRows = sheet.getRange(1, 1, Math.max(frozen, 1), lastCol).getValues();
+    var found = 0;
+    for (var r = 0; r < headerRows.length; r++) {
+      for (var c = 0; c < headerRows[r].length; c++) {
+        var text = headerRows[r][c] ? headerRows[r][c].toString().trim() : '';
+        if (!text || text.indexOf('日') === -1 || text.length > 25) continue;
+        found++;
+        var col = c + 1;
+        var cell = sheet.getRange(dataRow, col);
+        var validation = cell.getDataValidation();
+        var vDesc = '設定なし';
+        if (validation) {
+          var ct = validation.getCriteriaType();
+          var cv = validation.getCriteriaValues();
+          if (ct === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+            vDesc = 'リスト直接指定(' + cv[0].length + '件、プルダウン): ' + JSON.stringify(cv[0].slice(0, 5));
+          } else if (ct === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
+            vDesc = '範囲参照リスト(プルダウン): ' + cv[0].getSheet().getName() + '!' + cv[0].getA1Notation();
+          } else if (ct === SpreadsheetApp.DataValidationCriteria.DATE_IS_VALID_DATE) {
+            vDesc = '日付検証(カレンダー入力可)';
+          } else {
+            vDesc = ct + ': ' + JSON.stringify(cv);
+          }
+        }
+        var numFmt = cell.getNumberFormat();
+        var isMerged = sheet.getRange(r + 1, col).isPartOfMerge();
+        log.push('  ' + columnToLetter_(col) + '列(見出し行' + (r + 1) + '「' + text + '」): 入力規則=' + vDesc +
+          ' / 表示形式=' + numFmt + ' / 見出しセルは結合=' + isMerged);
+      }
+    }
+    if (found === 0) log.push('  「日」を含む見出しが見つかりませんでした。');
+  });
+
+  Logger.log(log.join('\n'));
+}
+
+/**
  * 【調査用・書き込みなし】旧スプレッドシートの「グラフ」シートのうち、指定した2範囲
  * (B78:U91、B65:AD71)をそのままログに出す。「クレーム集計」シート新設の依頼を受けて、
  * 旧システムのこの範囲に何が入っているか(表の構造・見出し・結合セル)を実物で確認するための調査用。
