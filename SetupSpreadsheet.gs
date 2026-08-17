@@ -125,6 +125,16 @@ var DEFECT_ITEMS = [
   { group: '外観・その他系', name: '変色・錆' }
 ];
 
+// 「クレーム集計」シートの集計元(ユーザーが旧システム形式で手作りした本物の「客先クレーム管理台帳(CC)」)
+// の列位置。2026-08-17、debugInspectCcLedgerColumns(MigrateOldData.gs)の実機調査で確認した値。
+// K列(クレーム内容分類)は自由入力(入力規則なし)だが、実際の入力値はDEFECT_ITEMSの項目名と一致していたため
+// そのままCOUNTIFS相当の集計に使える(addCcClaimCategoryValidationでプルダウンも追加し、今後もズレを防ぐ)。
+var CC_LEDGER_SHEET_NAME = '客先クレーム管理台帳(CC)';
+var CC_DATE_COL = 3;      // C列(発生日(受領日)、結合セルの左端)
+var CC_CATEGORY_COL = 11; // K列(クレーム内容分類)
+var CC_DATA_START_ROW = 6; // ヘッダーが3〜5行目(結合含む複数行)のため、データは6行目から
+var CC_DATA_END_ROW = 1000; // 手入力で増えていく台帳のため、余裕を持った行数まで集計対象にする
+
 // キズ原因マスタ(現行「キズ集計管理台帳」A〜Hの実データから踏襲。任意項目、主にキズ系の不良で原因分析用に使う)
 var KP_CAUSE_ITEMS = [
   { code: 'A', group: '流動', name: '洗浄時' },
@@ -178,6 +188,7 @@ function setupQualityDefectSystemFor_(ss) {
   buildDefectSummarySheet_(ss);
   buildKpCauseSummarySheet_(ss);
   buildMonthlySummarySheet_(ss);
+  buildClaimSummarySheet_(ss);
   buildDefectDashboardSheet_(ss);
 
   var masters = fetchOrgMasterLists_();
@@ -186,7 +197,7 @@ function setupQualityDefectSystemFor_(ss) {
   buildSkProcessLedgerSheet_(ss, masters);
 
   SpreadsheetApp.flush();
-  Logger.log('セットアップ完了(' + ss.getName() + '): 不良12シート、集計3シート、グラフ1シート、改善計画書台帳3シートを作成しました。');
+  Logger.log('セットアップ完了(' + ss.getName() + '): 不良12シート、集計4シート、グラフ1シート、改善計画書台帳3シートを作成しました。');
 }
 
 /**
@@ -752,6 +763,131 @@ function buildKpCauseSummarySheet_(ss) {
     },
     savedColumnWidths: savedWidths
   });
+}
+
+/**
+ * クレーム集計シート(2026-08-17追加)
+ * 旧システムの「グラフ」シートB78:U91(客先クレーム件数、月×分類18種)に相当する集計を、
+ * ユーザーが旧システム形式で手作りした「客先クレーム管理台帳(CC)」(K列=クレーム内容分類、
+ * C列=発生日)から、新マスタ(DEFECT_ITEMS、40項目)ベースで作り直したもの。
+ * CC台帳は「不良〇月」のような月別分割シートではなく通し番号の1本シートのため、COUNTIF方式ではなく
+ * SUMPRODUCT(MONTH(日付範囲)=対象月)で月ごとの件数を数える。個数・金額は無く件数のみ(旧グラフと同じ)。
+ * 不良集計・不良集計(キズ原因)と違って月ごとに1列(件数のみ)なのでbuildItemSummarySheet_は使わない。
+ */
+function buildClaimSummarySheet_(ss) {
+  var savedWidths = captureColumnWidths_(ss, 'クレーム集計');
+  var sheet = replaceSheet_(ss, 'クレーム集計');
+
+  var labelHeaders = ['不良項目', '分類'];
+  var labelCols = labelHeaders.length;
+  var monthStartCol = labelCols + 1;
+  var totalCol = monthStartCol + MONTHS.length;
+  var lastCol = totalCol;
+  var itemStartRow = 2;
+  var totalRow = itemStartRow + DEFECT_ITEMS.length;
+  var lastRow = totalRow;
+
+  var header = new Array(lastCol).fill('');
+  labelHeaders.forEach(function (h, i) { header[i] = h; });
+  MONTHS.forEach(function (month, mi) { header[monthStartCol - 1 + mi] = month + '月'; });
+  header[totalCol - 1] = '年計';
+  sheet.getRange(1, 1, 1, lastCol).setValues([header])
+    .setFontWeight('bold').setBackground(COLOR.HEADER_BG).setFontColor(COLOR.HEADER_FONT);
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(labelCols);
+
+  var groupColor = buildGroupColorMap_(DEFECT_ITEMS.map(function (item) { return item.group; }));
+  var ccRef = "'" + CC_LEDGER_SHEET_NAME + "'!";
+  var dateRange = ccRef + '$' + columnToLetter_(CC_DATE_COL) + '$' + CC_DATA_START_ROW + ':$' + columnToLetter_(CC_DATE_COL) + '$' + CC_DATA_END_ROW;
+  var categoryRange = ccRef + '$' + columnToLetter_(CC_CATEGORY_COL) + '$' + CC_DATA_START_ROW + ':$' + columnToLetter_(CC_CATEGORY_COL) + '$' + CC_DATA_END_ROW;
+
+  sheet.getRange(1, 1, lastRow, lastCol)
+    .setBorder(true, true, true, true, true, true, COLOR.GRID_BORDER, SpreadsheetApp.BorderStyle.SOLID);
+
+  DEFECT_ITEMS.forEach(function (item, i) {
+    var row = itemStartRow + i;
+    var nameCell = 'A' + row;
+    sheet.getRange(row, 1, 1, labelCols).setValues([[item.name, item.group]]);
+
+    MONTHS.forEach(function (month, mi) {
+      var col = monthStartCol + mi;
+      // 空欄行(発生日が空)をMONTH()=12月と誤判定しないよう、発生日が入っている行だけを対象にする
+      var formula = '=SUMPRODUCT((' + dateRange + '<>"")*(MONTH(' + dateRange + ')=' + month + ')*(' + categoryRange + '=' + nameCell + '))';
+      sheet.getRange(row, col).setFormula(formula);
+    });
+
+    var monthCells = [];
+    for (var mi2 = 0; mi2 < MONTHS.length; mi2++) monthCells.push(columnToLetter_(monthStartCol + mi2) + row);
+    sheet.getRange(row, totalCol).setFormula('=' + monthCells.join('+'));
+
+    var groupBase = groupColor[item.group];
+    sheet.getRange(row, 1, 1, lastCol).setBackground(groupBase);
+
+    if (i > 0 && item.group !== DEFECT_ITEMS[i - 1].group) {
+      sheet.getRange(row, 1, 1, lastCol)
+        .setBorder(true, null, null, null, null, null, COLOR.HEADER_BORDER, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    }
+  });
+
+  sheet.getRange(totalRow, 1).setValue('合計');
+  sheet.getRange(totalRow, 1, 1, labelCols).merge();
+  for (var col = monthStartCol; col <= totalCol; col++) {
+    var colLetter = columnToLetter_(col);
+    sheet.getRange(totalRow, col).setFormula('=SUM(' + colLetter + itemStartRow + ':' + colLetter + (totalRow - 1) + ')');
+  }
+  sheet.getRange(totalRow, 1, 1, lastCol)
+    .setBackground(COLOR.SUMMARY_TOTAL_BG).setFontColor(COLOR.TOTAL_FONT).setFontWeight('bold')
+    .setBorder(true, null, null, null, null, null, COLOR.HEADER_BORDER, SpreadsheetApp.BorderStyle.DOUBLE);
+
+  sheet.getRange(1, labelCols, lastRow, 1)
+    .setBorder(null, null, null, true, null, null, COLOR.HEADER_BORDER, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  sheet.getRange(1, totalCol - 1, lastRow, 1)
+    .setBorder(null, null, null, true, null, null, COLOR.HEADER_BORDER, SpreadsheetApp.BorderStyle.DOUBLE);
+
+  sheet.setColumnWidth(1, 220);
+  sheet.setColumnWidths(monthStartCol, MONTHS.length + 1, 45);
+
+  if (savedWidths && savedWidths.length === lastCol) {
+    savedWidths.forEach(function (w, idx) { sheet.setColumnWidth(idx + 1, w); });
+  }
+
+  sheet.getRange(1, 1, lastRow, lastCol).setVerticalAlignment('middle').setHorizontalAlignment('center');
+}
+
+/**
+ * 【1回だけ手動実行】現行年度の「クレーム集計」シートを追加する(2026-08-17新設)。
+ * setupQualityDefectSystemFor_の一部としてbuildClaimSummarySheet_を呼ぶよう組み込み済みのため、
+ * 来年度以降の新規スプレッドシートには自動的に含まれる。今年度分だけこれで追加する。
+ */
+function addClaimSummarySheet() {
+  var ss = getCurrentYearSpreadsheet_();
+  buildClaimSummarySheet_(ss);
+  SpreadsheetApp.flush();
+  Logger.log('「クレーム集計」シートを追加しました。');
+}
+
+/**
+ * 【1回だけ手動実行】「客先クレーム管理台帳(CC)」のK列(クレーム内容分類)に、DEFECT_ITEMSの
+ * 項目名からなるプルダウン(データの入力規則)を追加する(2026-08-17新設)。
+ * このシートはユーザーが旧システム形式で手作りしたもので、K列はこれまで自由入力(入力規則なし)
+ * だった。実際の入力値は幸いDEFECT_ITEMSの項目名と一致していたが、今後の表記ゆれ(集計漏れ)を
+ * 防ぐため、他の台帳(buildImprovementLedgerSheet_)と同じ考え方でプルダウンを追加する。
+ * setAllowInvalid(true)にしてあるため、既存の入力値やマスタに無い値を書いても壊れない
+ * (プルダウンの候補として出るだけで、直接入力も引き続きできる)。
+ */
+function addCcClaimCategoryValidation() {
+  var ss = getCurrentYearSpreadsheet_();
+  var sheet = ss.getSheetByName(CC_LEDGER_SHEET_NAME);
+  if (!sheet) throw new Error('「' + CC_LEDGER_SHEET_NAME + '」シートが見つかりません');
+
+  var itemNames = DEFECT_ITEMS.map(function (item) { return item.name; });
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(itemNames, true)
+    .setAllowInvalid(true)
+    .build();
+  var rows = 150; // 台帳の伸びしろとして150行分(buildImprovementLedgerSheet_と同じ考え方)
+  sheet.getRange(CC_DATA_START_ROW, CC_CATEGORY_COL, rows, 1).setDataValidation(rule);
+  Logger.log('「' + CC_LEDGER_SHEET_NAME + '」K列(' + CC_DATA_START_ROW + '〜' + (CC_DATA_START_ROW + rows - 1) + '行目)にプルダウンを追加しました。');
 }
 
 /**

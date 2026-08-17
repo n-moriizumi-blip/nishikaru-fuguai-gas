@@ -270,8 +270,9 @@ function writeDefectRecord_(body, verifiedName) {
  * MONTHS・DEFECT_ITEMS・KP_CAUSE_ITEMS・uniqueInOrder_ は同じGASプロジェクトの
  * SetupSpreadsheet.gs で定義済みのものをそのまま使う(同一プロジェクト内はグローバル共有のため、
  * writeDefectRecord_ が COLOR を参照しているのと同じ考え方)。
- * 「不良集計」「不良集計(キズ原因)」「月次サマリー」の列構成は SetupSpreadsheet.gs の
- * buildItemSummarySheet_ / buildMonthlySummarySheet_ と対応させること(ずれると集計が崩れる)。
+ * 「不良集計」「不良集計(キズ原因)」「月次サマリー」「クレーム集計」の列構成は SetupSpreadsheet.gs の
+ * buildItemSummarySheet_ / buildMonthlySummarySheet_ / buildClaimSummarySheet_ と対応させること
+ * (ずれると集計が崩れる)。
  */
 function buildDashboardData_() {
   var ss = getCurrentYearSpreadsheet_(); // 年度自動ロールオーバー対応(SetupSpreadsheet.gs参照、同一GASプロジェクト内で共有)
@@ -309,6 +310,12 @@ function buildDashboardData_() {
     for (var i = 0; i < causeSheetGroups.length; i++) if (causeSheetGroups[i] === g) sum += causeQtyValues[i];
     return sum;
   });
+
+  // --- クレーム集計: 客先クレーム件数の月別合計(合計行、SetupSpreadsheet.gsのbuildClaimSummarySheet_と対応) ---
+  var claimSheet = ss.getSheetByName('クレーム集計');
+  var claimMonthly = claimSheet
+    ? claimSheet.getRange(2 + DEFECT_ITEMS.length, 3, 1, MONTHS.length).getValues()[0].map(Number)
+    : MONTHS.map(function () { return 0; });
 
   // --- 不良〇月シート12枚: 得意先別金額・設備別個数・月別加工数合計(不良率の分母) ---
   var customerAmount = {}; // { 得意先名: 金額合計 }
@@ -359,6 +366,7 @@ function buildDashboardData_() {
     machines: topN(machineQty, 8),
     defectRate: defectRate,
     kpReworkRatio: kpReworkRatio,
+    claimMonthly: claimMonthly,
     updatedAt: new Date().toISOString()
   };
 }

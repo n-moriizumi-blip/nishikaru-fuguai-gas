@@ -304,6 +304,123 @@ function exportChartsAsImages() {
 }
 
 /**
+ * 【調査用・書き込みなし】旧スプレッドシートの「グラフ」シートのうち、指定した2範囲
+ * (B78:U91、B65:AD71)をそのままログに出す。「クレーム集計」シート新設の依頼を受けて、
+ * 旧システムのこの範囲に何が入っているか(表の構造・見出し・結合セル)を実物で確認するための調査用。
+ */
+function debugInspectClaimSummaryRanges() {
+  var ss = SpreadsheetApp.openById(MIGRATE_KP_SOURCE_SS_ID);
+  var sheet = ss.getSheetByName('グラフ');
+  if (!sheet) {
+    Logger.log('「グラフ」シートが見つかりません(全シート: ' + ss.getSheets().map(function (s) { return s.getName(); }).join(', ') + ')');
+    return;
+  }
+
+  var log = [];
+  ['B78:U91', 'B65:AD71'].forEach(function (a1) {
+    log.push('===== ' + a1 + ' =====');
+    var range = sheet.getRange(a1);
+    var startRow = range.getRow();
+    var values = range.getValues();
+    var merges = range.getMergedRanges().map(function (m) { return m.getA1Notation(); });
+    log.push('結合セル: ' + (merges.length ? merges.join(', ') : 'なし'));
+    values.forEach(function (row, i) {
+      var line = row.map(function (v) { return (v === '' || v === null) ? '・' : v; }).join(' | ');
+      log.push((startRow + i) + '行目: ' + line);
+    });
+    log.push('');
+  });
+
+  Logger.log(log.join('\n'));
+}
+
+/**
+ * 【調査用・書き込みなし】新システム側(現行年度)の「客先クレーム管理台帳(CC)」(ユーザーが
+ * 旧システム形式で手作りした本物のシート)の実際のヘッダー行・列位置・データ数行、および
+ * 「データ」シートの「クレーム内容分類」関連プルダウン候補をログに出す。
+ * 「クレーム集計」シート新設にあたり、集計元となるこのシートの列構成(特にクレーム内容分類の
+ * 実際の選択肢)が新マスタ(DEFECT_ITEMS、40項目)と同じか、旧システムのより粗い分類のままかを
+ * 確認するための調査用。
+ */
+function debugInspectCcLedgerColumns() {
+  var log = [];
+  var ss = getCurrentYearSpreadsheet_();
+  var sheet = ss.getSheetByName('客先クレーム管理台帳(CC)');
+  if (!sheet) {
+    log.push('「客先クレーム管理台帳(CC)」シートが見つかりません(全シート: ' + ss.getSheets().map(function (s) { return s.getName(); }).join(', ') + ')');
+    Logger.log(log.join('\n'));
+    return;
+  }
+
+  var lastCol = sheet.getLastColumn();
+  var lastRow = sheet.getLastRow();
+  log.push('シート「' + sheet.getName() + '」: ' + lastRow + '行 × ' + lastCol + '列(見た目上の最終行列)');
+
+  log.push('--- 先頭5行(A〜' + columnToLetter_(lastCol) + '列) ---');
+  var headRows = sheet.getRange(1, 1, Math.min(5, lastRow), lastCol).getValues();
+  headRows.forEach(function (row, i) {
+    log.push((i + 1) + '行目: ' + row.map(function (v) { return (v === '' || v === null) ? '・' : v; }).join(' | '));
+  });
+
+  // ヘッダーらしき行(「クレーム内容分類」を含む行)を探し、その列のデータ入力規則とデータ側の実データを見る
+  var headerRowIndex = -1, colIndex = -1;
+  for (var r = 0; r < headRows.length; r++) {
+    var idx = headRows[r].indexOf('クレーム内容分類');
+    if (idx !== -1) { headerRowIndex = r; colIndex = idx + 1; break; }
+  }
+  if (colIndex !== -1) {
+    log.push('--- 「クレーム内容分類」列: ' + columnToLetter_(colIndex) + '列(' + colIndex + '列目)、ヘッダー行=' + (headerRowIndex + 1) + '行目 ---');
+    var dataStartRow = headerRowIndex + 2;
+    if (dataStartRow <= lastRow) {
+      var validation = sheet.getRange(dataStartRow, colIndex).getDataValidation();
+      if (validation) {
+        var ct = validation.getCriteriaType();
+        var cv = validation.getCriteriaValues();
+        if (ct === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+          log.push('入力規則(直接リスト、' + cv[0].length + '件): ' + JSON.stringify(cv[0]));
+        } else if (ct === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
+          var range = cv[0];
+          var listVals = range.getValues().map(function (r) { return r[0]; }).filter(function (v) { return v; });
+          log.push('入力規則(範囲参照 ' + range.getSheet().getName() + '!' + range.getA1Notation() + '、' + listVals.length + '件): ' + JSON.stringify(listVals));
+        } else {
+          log.push('入力規則: リスト形式ではありません(' + JSON.stringify(cv) + ')');
+        }
+      } else {
+        log.push('入力規則: 設定なし');
+      }
+      var actualEnd = Math.min(dataStartRow + 14, lastRow);
+      if (actualEnd >= dataStartRow) {
+        var actualVals = sheet.getRange(dataStartRow, colIndex, actualEnd - dataStartRow + 1, 1).getValues().map(function (r) { return r[0]; }).filter(function (v) { return v; });
+        log.push('実際に入力済みの値(先頭' + actualVals.length + '件、重複含む): ' + JSON.stringify(actualVals));
+      }
+    }
+  } else {
+    log.push('「クレーム内容分類」という見出しが先頭5行に見つかりませんでした。');
+  }
+
+  // データシート側の「クレーム内容分類」関連の列も確認(旧システムでは「クレーム内容分類(CC・KP用)」という見出しがあった)
+  var dataSheet = ss.getSheetByName('データ');
+  if (dataSheet) {
+    var dLastCol = dataSheet.getLastColumn();
+    var dHeaderRow = dataSheet.getRange(1, 1, 1, dLastCol).getValues()[0];
+    log.push('--- 「データ」シートのヘッダー行(1行目) ---');
+    log.push(dHeaderRow.map(function (v, i) { return columnToLetter_(i + 1) + ':' + (v || '・'); }).join(' | '));
+    for (var c = 0; c < dHeaderRow.length; c++) {
+      if (dHeaderRow[c] && dHeaderRow[c].toString().indexOf('クレーム') !== -1) {
+        var colLetter = columnToLetter_(c + 1);
+        var lastR = dataSheet.getLastRow();
+        var vals = dataSheet.getRange(2, c + 1, Math.max(lastR - 1, 1), 1).getValues().map(function (r) { return r[0]; }).filter(function (v) { return v; });
+        log.push(colLetter + '列「' + dHeaderRow[c] + '」の中身(' + vals.length + '件): ' + JSON.stringify(vals));
+      }
+    }
+  } else {
+    log.push('「データ」シートが見つかりません。');
+  }
+
+  Logger.log(log.join('\n'));
+}
+
+/**
  * 【調査用】KP側「社内不具合6月」「社内不具合7月」シートの実際のヘッダー行(先頭10行)と
  * 年度2026の差し戻しデータの有無を、そのままログに出す(列名の推測が外れたため実物を確認する用)
  */
