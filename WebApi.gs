@@ -318,6 +318,9 @@ function buildDashboardData_() {
     : MONTHS.map(function () { return 0; });
 
   // --- 客先クレーム管理台帳(CC): 加工者別・検査員別のクレーム件数(2026-08-17追加) ---
+  // 見出し文字列そのもの(「検査員」「検査員名」等)がデータ行に紛れ込んでいた場合に、実在の1人として
+  // 誤カウントしないよう除外する(2026-08-17、実機で「検査員名」が集計に混入する不具合が判明したため対応)。
+  var CC_LABEL_LIKE_VALUES_ = ['加工者', '加工者名', '検査員', '検査員名'];
   var kakoshaCount = {}, kensainCount = {};
   var ccSheetForRanking = ss.getSheetByName(CC_LEDGER_SHEET_NAME);
   if (ccSheetForRanking) {
@@ -328,11 +331,11 @@ function buildDashboardData_() {
       var kensainValues = ccSheetForRanking.getRange(CC_DATA_START_ROW, CC_INSPECTOR_COL, ccRows, 1).getValues();
       kakoshaValues.forEach(function (r) {
         var v = r[0] ? r[0].toString().trim() : '';
-        if (v) kakoshaCount[v] = (kakoshaCount[v] || 0) + 1;
+        if (v && CC_LABEL_LIKE_VALUES_.indexOf(v) === -1) kakoshaCount[v] = (kakoshaCount[v] || 0) + 1;
       });
       kensainValues.forEach(function (r) {
         var v = r[0] ? r[0].toString().trim() : '';
-        if (v) kensainCount[v] = (kensainCount[v] || 0) + 1;
+        if (v && CC_LABEL_LIKE_VALUES_.indexOf(v) === -1) kensainCount[v] = (kensainCount[v] || 0) + 1;
       });
     }
   }
