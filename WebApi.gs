@@ -317,6 +317,26 @@ function buildDashboardData_() {
     ? claimSheet.getRange(2 + DEFECT_ITEMS.length, 3, 1, MONTHS.length).getValues()[0].map(Number)
     : MONTHS.map(function () { return 0; });
 
+  // --- 客先クレーム管理台帳(CC): 加工者別・検査員別のクレーム件数(2026-08-17追加) ---
+  var kakoshaCount = {}, kensainCount = {};
+  var ccSheetForRanking = ss.getSheetByName(CC_LEDGER_SHEET_NAME);
+  if (ccSheetForRanking) {
+    var ccLastRow = ccSheetForRanking.getLastRow();
+    var ccRows = Math.max(ccLastRow - CC_DATA_START_ROW + 1, 0);
+    if (ccRows > 0) {
+      var kakoshaValues = ccSheetForRanking.getRange(CC_DATA_START_ROW, CC_WORKER_COL, ccRows, 1).getValues();
+      var kensainValues = ccSheetForRanking.getRange(CC_DATA_START_ROW, CC_INSPECTOR_COL, ccRows, 1).getValues();
+      kakoshaValues.forEach(function (r) {
+        var v = r[0] ? r[0].toString().trim() : '';
+        if (v) kakoshaCount[v] = (kakoshaCount[v] || 0) + 1;
+      });
+      kensainValues.forEach(function (r) {
+        var v = r[0] ? r[0].toString().trim() : '';
+        if (v) kensainCount[v] = (kensainCount[v] || 0) + 1;
+      });
+    }
+  }
+
   // --- 不良〇月シート12枚: 得意先別金額・設備別個数・月別加工数合計(不良率の分母) ---
   var customerAmount = {}; // { 得意先名: 金額合計 }
   var machineQty = {};     // { 機種名: 不良個数合計 }
@@ -367,6 +387,8 @@ function buildDashboardData_() {
     defectRate: defectRate,
     kpReworkRatio: kpReworkRatio,
     claimMonthly: claimMonthly,
+    claimByWorker: topN(kakoshaCount, 8),
+    claimByInspector: topN(kensainCount, 8),
     updatedAt: new Date().toISOString()
   };
 }

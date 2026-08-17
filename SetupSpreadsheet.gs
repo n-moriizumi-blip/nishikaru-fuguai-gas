@@ -134,6 +134,8 @@ var CC_DATE_COL = 3;      // C列(発生日(受領日)、結合セルの左端)
 var CC_CATEGORY_COL = 11; // K列(クレーム内容分類)
 var CC_DATA_START_ROW = 6; // ヘッダーが3〜5行目(結合含む複数行)のため、データは6行目から
 var CC_DATA_END_ROW = 1000; // 手入力で増えていく台帳のため、余裕を持った行数まで集計対象にする
+var CC_WORKER_COL = 14;    // N列(加工者)
+var CC_INSPECTOR_COL = 16; // P列(検査員)
 
 // キズ原因マスタ(現行「キズ集計管理台帳」A〜Hの実データから踏襲。任意項目、主にキズ系の不良で原因分析用に使う)
 var KP_CAUSE_ITEMS = [
@@ -811,8 +813,11 @@ function buildClaimSummarySheet_(ss) {
 
     MONTHS.forEach(function (month, mi) {
       var col = monthStartCol + mi;
-      // 空欄行(発生日が空)をMONTH()=12月と誤判定しないよう、発生日が入っている行だけを対象にする
-      var formula = '=SUMPRODUCT((' + dateRange + '<>"")*(MONTH(' + dateRange + ')=' + month + ')*(' + categoryRange + '=' + nameCell + '))';
+      // 空欄行(発生日が空)をMONTH()=12月と誤判定しないよう、発生日が入っている行だけを対象にする。
+      // また発生日の範囲に「日付として解析できない文字列」が1件でも混じっていると、SUMPRODUCTは
+      // 掛け算で0倍される前にMONTH()自体が#VALUE!を返し配列全体に伝播してしまう(実機で確認、
+      // 2026-08-17)。IFERRORでそのセルだけ0(どの月とも一致しない値)に読み替えて回避する。
+      var formula = '=SUMPRODUCT((' + dateRange + '<>"")*(IFERROR(MONTH(' + dateRange + '),0)=' + month + ')*(' + categoryRange + '=' + nameCell + '))';
       sheet.getRange(row, col).setFormula(formula);
     });
 
