@@ -137,6 +137,13 @@ var CC_DATA_END_ROW = 1000; // 手入力で増えていく台帳のため、余�
 var CC_WORKER_COL = 14;    // N列(加工者)
 var CC_INSPECTOR_COL = 16; // P列(検査員)
 
+// 「社内不良管理台帳(製造工程)(SK)」の発生日列。2026-08-17、debugInspectDateColumnValidationの実機調査で
+// C列(発生日(品質会議開催日))だけ日付の入力規則が無く表示形式も壊れている(0.###############)ことが
+// 判明したため、CC/KPと同じ日付検証+表示形式に直す(fixSkDateColumnValidation)。
+var SK_LEDGER_SHEET_NAME = '社内不良管理台帳(製造工程)(SK)';
+var SK_DATE_COL = 3;      // C列(発生日(品質会議開催日))
+var SK_DATA_START_ROW = 5; // 固定行数4(ヘッダーが1〜4行目)のため、データは5行目から
+
 // キズ原因マスタ(現行「キズ集計管理台帳」A〜Hの実データから踏襲。任意項目、主にキズ系の不良で原因分析用に使う)
 var KP_CAUSE_ITEMS = [
   { code: 'A', group: '流動', name: '洗浄時' },
@@ -893,6 +900,32 @@ function addCcClaimCategoryValidation() {
   var rows = 150; // 台帳の伸びしろとして150行分(buildImprovementLedgerSheet_と同じ考え方)
   sheet.getRange(CC_DATA_START_ROW, CC_CATEGORY_COL, rows, 1).setDataValidation(rule);
   Logger.log('「' + CC_LEDGER_SHEET_NAME + '」K列(' + CC_DATA_START_ROW + '〜' + (CC_DATA_START_ROW + rows - 1) + '行目)にプルダウンを追加しました。');
+}
+
+/**
+ * 【1回だけ手動実行】「社内不良管理台帳(製造工程)(SK)」のC列(発生日(品質会議開催日))に、
+ * CC/KP台帳と同じ日付の入力規則(カレンダーアイコンから選択可能)・表示形式を設定する(2026-08-17新設)。
+ * debugInspectDateColumnValidation(MigrateOldData.gs)の実機調査で、この列だけ入力規則が無く
+ * 表示形式も日付になっていない(0.###############、生の数値書式)ことが判明したための対応。
+ * 既存の入力済みデータ(値そのもの)は一切変更しない(表示形式・入力規則のみ変更)。
+ * setAllowInvalid(true)にしてあるため、既存データが仮に日付以外の値でもエラー扱いにはならない。
+ */
+function fixSkDateColumnValidation() {
+  var ss = getCurrentYearSpreadsheet_();
+  var sheet = ss.getSheetByName(SK_LEDGER_SHEET_NAME);
+  if (!sheet) throw new Error('「' + SK_LEDGER_SHEET_NAME + '」シートが見つかりません');
+
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireDate()
+    .setAllowInvalid(true)
+    .setHelpText('日付を入力してください(例: 2026/8/17)。セルを選択すると右端に出るカレンダーアイコンからも選べます。')
+    .build();
+  var rows = 150; // 台帳の伸びしろ(buildImprovementLedgerSheet_のdataRowsと同じ考え方)
+  var range = sheet.getRange(SK_DATA_START_ROW, SK_DATE_COL, rows, 1);
+  range.setDataValidation(rule);
+  range.setNumberFormat('yyyy"年"m"月"d"日"'); // CC/KPの発生日列と同じ表示形式に揃える
+
+  Logger.log('「' + SK_LEDGER_SHEET_NAME + '」C列(' + SK_DATA_START_ROW + '〜' + (SK_DATA_START_ROW + rows - 1) + '行目)に日付検証・表示形式を設定しました。');
 }
 
 /**
