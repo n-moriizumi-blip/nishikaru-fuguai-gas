@@ -1493,7 +1493,10 @@ function buildLedgerSheetV2_(ss, sheetName, recordFields, staffList, formulaCols
 
   sheet.getRange(1, 1, 2, lastCol).setFontWeight('bold').setBackground(COLOR.HEADER_BG).setFontColor(COLOR.HEADER_FONT);
   sheet.setFrozenRows(2);
-  sheet.setFrozenColumns(3); // 台帳番号・発生日・関連文書あたりまで固定してワークフロー欄をスクロールしやすくする
+  // 記録情報欄は1セルに結合しているため、その途中の列で固定すると「結合されたセルの一部だけを含む
+  // 列を固定することはできません」エラーになる(2026-08-18、実機で発生)。結合の境目(記録情報欄の
+  // 全列)で固定し、ワークフロー欄をスクロールしても台帳番号・発生日等が常に見えるようにする。
+  sheet.setFrozenColumns(recordColCount);
 
   // --- データ行の縞模様(下地。ステップ欄は後でこの上から塗りつぶす) ---
   var bandColors = [];
