@@ -1487,17 +1487,15 @@ function buildLedgerSheetV2_(ss, sheetName, recordFields, staffList, formulaCols
   sheet.getRange(2, 1, 1, lastCol).setValues([group2]);
 
   // 両方の行に値を書き終えてからマージする(先にマージすると2行目への書き込みでエラーになるため)。
-  // 【2026-08-18訂正】記録情報欄の見出しは当初、全列(CCで18列)を1セルに結合していたが、そのままだと
-  // 列固定できる範囲が「結合セル全体」に限定されてしまい、固定エリアが横に広くなりすぎて
-  // 実機で「ウィンドウが小さすぎて表示できない」問題が発生した。記録情報欄はステップ欄と違って
-  // 各列の見出し(台帳番号・発生日等)をそのまま見せれば十分なため、結合はステップ欄・判定備考欄
-  // だけにとどめ、記録情報欄は結合せず数列だけ固定できるようにした。
+  // 【2026-08-18訂正】列固定と結合セルは「固定範囲が結合セル全体と一致しない限り併用できない」ため、
+  // 列固定はしない方針にした(ユーザー合意)。列固定が無ければ制約が無いため、記録情報欄も
+  // ステップ欄・判定備考欄と同じく全列を結合してグループ見出しらしく見せる。
+  sheet.getRange(1, 1, 1, recordColCount).merge();
   LEDGER_WORKFLOW_STEPS.forEach(function (step, i) { sheet.getRange(1, stepStartCol + i * 2, 1, 2).merge(); });
   sheet.getRange(1, tailStartCol, 1, tailHeaders.length).merge();
 
   sheet.getRange(1, 1, 2, lastCol).setFontWeight('bold').setBackground(COLOR.HEADER_BG).setFontColor(COLOR.HEADER_FONT);
-  sheet.setFrozenRows(2);
-  sheet.setFrozenColumns(Math.min(3, recordColCount)); // 台帳番号・発生日あたりを固定してワークフロー欄をスクロールしやすくする
+  sheet.setFrozenRows(2); // 列固定はしない(2026-08-18、ユーザー合意)。一番左のまま。
 
   // --- データ行の縞模様(下地。ステップ欄は後でこの上から塗りつぶす) ---
   var bandColors = [];
@@ -1517,23 +1515,14 @@ function buildLedgerSheetV2_(ss, sheetName, recordFields, staffList, formulaCols
     sheet.getRange(dataStartRow, col, dataRows, 2).setBackground(color);
   });
 
-  // --- 記録情報欄: プルダウン・日付列・列幅 ---
+  // --- 記録情報欄: プルダウン・日付列 ---
   recordFields.forEach(function (f, i) {
     var col = i + 1;
     if (f.dropdown && f.dropdown.length > 0) {
       var rule = SpreadsheetApp.newDataValidation().requireValueInList(f.dropdown, true).setAllowInvalid(true).build();
       sheet.getRange(dataStartRow, col, dataRows, 1).setDataValidation(rule);
     }
-    if (/発生日|開催日/.test(f.header)) {
-      applyLedgerDateColumn_(sheet, col, dataStartRow, dataRows);
-      sheet.setColumnWidth(col, 110);
-    } else if (/詳細|備考/.test(f.header)) {
-      sheet.setColumnWidth(col, 220);
-    } else if (/関連文書/.test(f.header)) {
-      sheet.setColumnWidth(col, 150);
-    } else {
-      sheet.setColumnWidth(col, 100);
-    }
+    if (/発生日|開催日/.test(f.header)) applyLedgerDateColumn_(sheet, col, dataStartRow, dataRows);
   });
 
   // --- ワークフロー欄: 担当(全ステップ共通プルダウン)+完了日(単一セル・日付検証) ---
@@ -1543,16 +1532,11 @@ function buildLedgerSheetV2_(ss, sheetName, recordFields, staffList, formulaCols
     var dateCol = workerCol + 1;
     sheet.getRange(dataStartRow, workerCol, dataRows, 1).setDataValidation(staffRule);
     applyLedgerDateColumn_(sheet, dateCol, dataStartRow, dataRows);
-    sheet.setColumnWidth(workerCol, 90);
-    sheet.setColumnWidth(dateCol, 100);
   });
 
   // --- 判定(〇/×)・差し戻し文書No.・備考 ---
   var hankoRule = SpreadsheetApp.newDataValidation().requireValueInList(HANKO_CHOICES_, true).setAllowInvalid(true).build();
   sheet.getRange(dataStartRow, tailStartCol, dataRows, 1).setDataValidation(hankoRule);
-  sheet.setColumnWidth(tailStartCol, 110);
-  sheet.setColumnWidth(tailStartCol + 1, 150);
-  sheet.setColumnWidth(tailStartCol + 2, 220);
 
   // --- 金額の自動計算(数量×単価) ---
   if (formulaCols) {
@@ -1583,6 +1567,9 @@ function buildLedgerSheetV2_(ss, sheetName, recordFields, staffList, formulaCols
   });
 
   sheet.getRange(1, 1, lastDataRow, lastCol).setVerticalAlignment('middle').setHorizontalAlignment('center');
+
+  // 列幅をデータ(見出し文字列)に合わせて自動調整する(2026-08-18、ユーザー依頼)
+  sheet.autoResizeColumns(1, lastCol);
 
   if (savedWidths && savedWidths.length === lastCol) {
     savedWidths.forEach(function (w, idx) { sheet.setColumnWidth(idx + 1, w); });
