@@ -643,6 +643,40 @@ function addManufacturingNumberColumn() {
 }
 
 /**
+ * 【1回だけ手動実行・2026-08-18】既存の「不良〇月」12シートで、キズ原因列をV列(22列目、非表示)から
+ * N列(14列目、不良項目の直後)へ移動し、表示状態にする。あわせて見出しから「(任意)」を削除。
+ * ユーザー依頼: 「キズ原因(任意)の(任意)は不要で、VからN列に移動して。非表示列はIDだけで良い」。
+ * `sheet.moveColumns()`はデータ・入力規則・書式を保持したまま列を移動し、K・S・V列(良品数・金額・
+ * 不良率)の数式が参照するセルも(ドラッグで列移動したときと同様に)Google Sheets側が自動的に
+ * 追従するため、移動後に改めて数式を書き直す必要はない。列構成をコード側(buildDefectMonthlySheet_)も
+ * 合わせて変更済みのため、この関数は既存2026年度シートへの反映専用(来年度以降は最初から新しい
+ * 構成で作られる)。何度実行しても、既に移動済みの月はスキップする(冪等)。
+ */
+function moveKizuGeninColumnToN() {
+  var ss = getCurrentYearSpreadsheet_();
+  var log = [];
+  MONTHS.forEach(function (month) {
+    var sheet = ss.getSheetByName('不良' + month + '月');
+    if (!sheet) return;
+    if (sheet.getRange(1, 14).getValue() === 'キズ原因') {
+      log.push('不良' + month + '月: 既にN列へ移動済みのためスキップ');
+      return;
+    }
+    if (sheet.getRange(1, 22).getValue().toString().indexOf('キズ原因') === -1) {
+      log.push('不良' + month + '月: 【要確認】V列がキズ原因ではありませんでした(想定外の構成のため何もしていません)');
+      return;
+    }
+    sheet.moveColumns(sheet.getRange(1, 22, sheet.getMaxRows(), 1), 14);
+    sheet.getRange(1, 14).setValue('キズ原因'); // 見出しから「(任意)」を削除
+    sheet.showColumns(14); // 移動前は非表示だったため、移動後にあらためて表示状態にする
+    sheet.setColumnWidth(14, 160);
+    log.push('不良' + month + '月: キズ原因をN列へ移動し、表示状態にしました');
+  });
+  SpreadsheetApp.flush();
+  Logger.log(log.join('\n'));
+}
+
+/**
  * 【診断用・手動実行】現在の年度のスプレッドシートに実際にあるシートを一覧表示する(2026-08-15新設)。
  * ユーザーが直接シートを追加・変更した場合に、コード側(setupQualityDefectSystemFor_等)が把握している
  * 構成とのズレを確認するために使う。シート名・表示/非表示・行数・列数をログに出す。
@@ -694,13 +728,18 @@ function buildDefectMonthlySheet_(ss, month) {
   var sheetName = '不良' + month + '月';
   var sheet = replaceSheet_(ss, sheetName);
 
+  // 【2026-08-18改訂】キズ原因をV列からN列(不良項目の直後)へ移動し、常時表示に変更(以前は
+  // 非表示列だったが、入力アプリ側で条件表示・場合により必須の実項目になったため)。見出しからも
+  // 「(任意)」を削除。非表示列は送信ID(内部管理用)だけにした。既存の2026年度シートは
+  // moveKizuGeninColumnToN(1回だけ手動実行)で移行済み(新規作成される年度分はここから正しい構成になる)。
   var headers = [
     'タイムスタンプ', '処置区分', '品証担当者', '製造番号', '得意先名', '品番(図番)', '加工者', '機種名', '設備№',
     '加工数', '良品数', '不良数計',
-    '不良項目', '不良数', '不良項目詳細',
+    '不良項目', 'キズ原因',
+    '不良数', '不良項目詳細',
     '担当者2',
     '単価', '金額', '備考', '材質', '不良率',
-    'キズ原因(任意)', '送信ID'
+    '送信ID'
   ];
   var lastCol = headers.length;
   sheet.getRange(1, 1, 1, lastCol).setValues([headers])
@@ -733,8 +772,8 @@ function buildDefectMonthlySheet_(ss, month) {
   sheet.getRange(2, 13, 114, 1).setDataValidation(itemRule);
 
   // 処置区分(B列)の値に応じて行全体を色分け(社内不良(KP)=薄青地に紺文字、差し戻し=薄橙地に茶文字)。
-  // V・W列(非表示列)はこの色分けの対象外にする(非表示なので見た目上は影響しないが、範囲を広げる意味がないため)。
-  var fullRowRange = sheet.getRange(2, 1, 114, lastCol - 2);
+  // W列(送信ID、非表示列)はこの色分けの対象外にする(非表示なので見た目上は影響しないが、範囲を広げる意味がないため)。
+  var fullRowRange = sheet.getRange(2, 1, 114, lastCol - 1);
   var kpRule = SpreadsheetApp.newConditionalFormatRule()
     .whenFormulaSatisfied('=$B2="社内不良(KP)"')
     .setBackground(COLOR.KP_BG)
@@ -755,10 +794,9 @@ function buildDefectMonthlySheet_(ss, month) {
   sheet.getRange(1, 1, 1, lastCol)
     .setBorder(null, null, true, null, null, null, COLOR.HEADER_BORDER, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 
-  // V列(キズ原因)・W列(送信ID)は運用上見る必要がない列のため、列ごと非表示にする
-  // (以前は薄いグレー文字で「見えにくくする」だけだったが、行の色分け(背景・文字色)の対象外にした
-  // ことで他の列と見た目が不揃いになってしまっていたため、素直に列を隠す方式に変更した)
-  sheet.hideColumns(22, 2);
+  // W列(送信ID)は内部管理用(編集機能が記録を見つけるためのキー)で運用上見る必要が無いため、
+  // 列ごと非表示にする。キズ原因(N列)は2026-08-18から常時表示に変更(以前は非表示だった)。
+  sheet.hideColumns(23, 1);
 
   sheet.setColumnWidth(1, 130); // タイムスタンプ
   sheet.setColumnWidth(2, 120); // 処置区分
@@ -766,21 +804,22 @@ function buildDefectMonthlySheet_(ss, month) {
   sheet.setColumnWidth(4, 140); // 製造番号
   sheet.setColumnWidth(6, 150); // 品番(図番)
   sheet.setColumnWidth(13, 220); // 不良項目
-  sheet.setColumnWidth(15, 240); // 不良項目詳細
-  sheet.setColumnWidth(16, 140); // 担当者2(不良項目ごとに原因を作った担当者が違う場合のみ入力する任意項目)
+  sheet.setColumnWidth(14, 160); // キズ原因
+  sheet.setColumnWidth(16, 240); // 不良項目詳細
+  sheet.setColumnWidth(17, 140); // 担当者2(不良項目ごとに原因を作った担当者が違う場合のみ入力する任意項目)
 
-  // K列(良品数)・R列(金額)・U列(不良率)は自動計算式
+  // K列(良品数)・S列(金額)・V列(不良率)は自動計算式
   var ryohinFormulas = [];
   var amountFormulas = [];
   var rateFormulas = [];
   for (var r = 2; r <= 115; r++) {
     ryohinFormulas.push(['=IFERROR(J' + r + '-L' + r + ',"")']);
-    amountFormulas.push(['=IFERROR(L' + r + '*Q' + r + ',"")']);
+    amountFormulas.push(['=IFERROR(L' + r + '*R' + r + ',"")']);
     rateFormulas.push(['=IFERROR(L' + r + '/J' + r + ',"")']);
   }
-  sheet.getRange(2, 11, 114, 1).setFormulas(ryohinFormulas);
-  sheet.getRange(2, 18, 114, 1).setFormulas(amountFormulas);
-  sheet.getRange(2, 21, 114, 1).setFormulas(rateFormulas).setNumberFormat('0.00%');
+  sheet.getRange(2, 11, 114, 1).setFormulas(ryohinFormulas);   // K 良品数
+  sheet.getRange(2, 19, 114, 1).setFormulas(amountFormulas);   // S 金額
+  sheet.getRange(2, 22, 114, 1).setFormulas(rateFormulas).setNumberFormat('0.00%'); // V 不良率
 
   // 見やすさ: シート全体を垂直方向中央揃え、ヘッダー行は水平方向も中央揃え
   sheet.getRange(1, 1, 115, lastCol).setVerticalAlignment('middle');
@@ -806,7 +845,8 @@ function buildDefectSummarySheet_(ss) {
       return '=COUNTIF(\'' + monthSheetName + '\'!M2:M115,' + nameCell + ')';
     },
     qtyFormula: function (monthSheetName, nameCell) {
-      return '=SUMIF(\'' + monthSheetName + '\'!M2:M115,' + nameCell + ',\'' + monthSheetName + '\'!N2:N115)';
+      // O列(不良数)。2026-08-18、キズ原因をN列へ移動したためN列(旧不良数)からO列へ変更
+      return '=SUMIF(\'' + monthSheetName + '\'!M2:M115,' + nameCell + ',\'' + monthSheetName + '\'!O2:O115)';
     },
     savedColumnWidths: savedWidths
   });
@@ -814,7 +854,8 @@ function buildDefectSummarySheet_(ss) {
 
 /**
  * キズ原因の集計シート(現行「キズ集計管理台帳」相当、任意項目のため参考用)
- * 各月シートの「キズ原因」列(V列)を件数(COUNTIF)で、対応する不良数計(L列)を個数(SUMIF)で集計。
+ * 各月シートの「キズ原因」列(N列、2026-08-18にV列から移動)を件数(COUNTIF)で、
+ * 対応する不良数計(L列)を個数(SUMIF)で集計。
  * 月ごとに件数・個数の2列(2026-08-12追加)、最下行に月ごとの合計行(2026-08-12追加)。
  * 原因コード(A〜H)ごとに行の色を分ける。
  */
@@ -828,10 +869,10 @@ function buildKpCauseSummarySheet_(ss) {
     groupOf: function (item) { return item.code; },
     nameCellCol: 3, // 集計の照合キーは3列目(原因名)
     countFormula: function (monthSheetName, nameCell) {
-      return '=COUNTIF(\'' + monthSheetName + '\'!V2:V115,"*"&' + nameCell + ')';
+      return '=COUNTIF(\'' + monthSheetName + '\'!N2:N115,"*"&' + nameCell + ')';
     },
     qtyFormula: function (monthSheetName, nameCell) {
-      return '=SUMIF(\'' + monthSheetName + '\'!V2:V115,"*"&' + nameCell + ',\'' + monthSheetName + '\'!L2:L115)';
+      return '=SUMIF(\'' + monthSheetName + '\'!N2:N115,"*"&' + nameCell + ',\'' + monthSheetName + '\'!L2:L115)';
     },
     savedColumnWidths: savedWidths
   });
@@ -1287,7 +1328,7 @@ function buildMonthlySummarySheet_(ss) {
 
     sheet.getRange(kpCountRow, col).setFormula('=COUNTIFS(' + sn + '!A2:A115,"<>",' + sn + '!B2:B115,"社内不良(KP)")');
     sheet.getRange(kpQtyRow, col).setFormula('=SUMIFS(' + sn + '!L2:L115,' + sn + '!B2:B115,"社内不良(KP)")');
-    sheet.getRange(kpAmountRow, col).setFormula('=SUMIFS(' + sn + '!R2:R115,' + sn + '!B2:B115,"社内不良(KP)")');
+    sheet.getRange(kpAmountRow, col).setFormula('=SUMIFS(' + sn + '!S2:S115,' + sn + '!B2:B115,"社内不良(KP)")'); // S列(金額、2026-08-18にR列から移動)
     sheet.getRange(reworkCountRow, col).setFormula('=COUNTIFS(' + sn + '!A2:A115,"<>",' + sn + '!B2:B115,"差し戻し")');
     sheet.getRange(reworkQtyRow, col).setFormula('=SUMIFS(' + sn + '!L2:L115,' + sn + '!B2:B115,"差し戻し")');
     sheet.getRange(totalCountRow, col).setFormula('=' + colLetter + kpCountRow + '+' + colLetter + reworkCountRow);
