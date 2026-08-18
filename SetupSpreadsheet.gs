@@ -1486,17 +1486,18 @@ function buildLedgerSheetV2_(ss, sheetName, recordFields, staffList, formulaCols
   sheet.getRange(1, 1, 1, lastCol).setValues([group1]);
   sheet.getRange(2, 1, 1, lastCol).setValues([group2]);
 
-  // 両方の行に値を書き終えてからマージする(先にマージすると2行目への書き込みでエラーになるため)
-  sheet.getRange(1, 1, 1, recordColCount).merge();
+  // 両方の行に値を書き終えてからマージする(先にマージすると2行目への書き込みでエラーになるため)。
+  // 【2026-08-18訂正】記録情報欄の見出しは当初、全列(CCで18列)を1セルに結合していたが、そのままだと
+  // 列固定できる範囲が「結合セル全体」に限定されてしまい、固定エリアが横に広くなりすぎて
+  // 実機で「ウィンドウが小さすぎて表示できない」問題が発生した。記録情報欄はステップ欄と違って
+  // 各列の見出し(台帳番号・発生日等)をそのまま見せれば十分なため、結合はステップ欄・判定備考欄
+  // だけにとどめ、記録情報欄は結合せず数列だけ固定できるようにした。
   LEDGER_WORKFLOW_STEPS.forEach(function (step, i) { sheet.getRange(1, stepStartCol + i * 2, 1, 2).merge(); });
   sheet.getRange(1, tailStartCol, 1, tailHeaders.length).merge();
 
   sheet.getRange(1, 1, 2, lastCol).setFontWeight('bold').setBackground(COLOR.HEADER_BG).setFontColor(COLOR.HEADER_FONT);
   sheet.setFrozenRows(2);
-  // 記録情報欄は1セルに結合しているため、その途中の列で固定すると「結合されたセルの一部だけを含む
-  // 列を固定することはできません」エラーになる(2026-08-18、実機で発生)。結合の境目(記録情報欄の
-  // 全列)で固定し、ワークフロー欄をスクロールしても台帳番号・発生日等が常に見えるようにする。
-  sheet.setFrozenColumns(recordColCount);
+  sheet.setFrozenColumns(Math.min(3, recordColCount)); // 台帳番号・発生日あたりを固定してワークフロー欄をスクロールしやすくする
 
   // --- データ行の縞模様(下地。ステップ欄は後でこの上から塗りつぶす) ---
   var bandColors = [];
