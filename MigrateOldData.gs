@@ -329,8 +329,12 @@ function debugInspectDateColumnValidation() {
     var found = 0;
     for (var r = 0; r < headerRows.length; r++) {
       for (var c = 0; c < headerRows[r].length; c++) {
-        var text = headerRows[r][c] ? headerRows[r][c].toString().trim() : '';
-        if (!text || text.indexOf('日') === -1 || text.length > 25) continue;
+        // 見出しセルは装飾用の全角スペース詰め("発生日                             （受領日）"等)が
+        // 大量に入っていることがあるため、判定・表示ともスペース類を詰めてから使う(2026-08-17、
+        // 最初の版は元の文字列の長さで足切りしていたため長い見出しを取りこぼしていた不具合を修正)
+        var rawText = headerRows[r][c] ? headerRows[r][c].toString() : '';
+        var text = rawText.replace(/[\s　]+/g, '');
+        if (!text || text.indexOf('日') === -1) continue;
         found++;
         var col = c + 1;
         var cell = sheet.getRange(dataRow, col);

@@ -125,17 +125,45 @@ var DEFECT_ITEMS = [
   { group: '外観・その他系', name: '変色・錆' }
 ];
 
-// 「クレーム集計」シートの集計元(ユーザーが旧システム形式で手作りした本物の「客先クレーム管理台帳(CC)」)
-// の列位置。2026-08-17、debugInspectCcLedgerColumns(MigrateOldData.gs)の実機調査で確認した値。
-// K列(クレーム内容分類)は自由入力(入力規則なし)だが、実際の入力値はDEFECT_ITEMSの項目名と一致していたため
-// そのままCOUNTIFS相当の集計に使える(addCcClaimCategoryValidationでプルダウンも追加し、今後もズレを防ぐ)。
+// 「クレーム集計」シート・ダッシュボードの加工者別/検査員別集計の集計元となる
+// 「客先クレーム管理台帳(CC)」の列位置。
+// 【2026-08-18訂正】旧デザイン(結合セルの複数行ヘッダー)の実機調査(2026-08-17)で得た列番号を
+// 一時的に固定値で持っていたが、buildLedgerSheetV2_導入(台帳のリニューアル)で列位置が変わるため、
+// resolveCcLedgerColumns_で見出し文字列から動的に求める方式に変更した(旧デザイン・新デザインの
+// どちらが実際に稼働していても、見出し名さえ一致すれば自動的に追随する)。
 var CC_LEDGER_SHEET_NAME = '客先クレーム管理台帳(CC)';
-var CC_DATE_COL = 3;      // C列(発生日(受領日)、結合セルの左端)
-var CC_CATEGORY_COL = 11; // K列(クレーム内容分類)
-var CC_DATA_START_ROW = 6; // ヘッダーが3〜5行目(結合含む複数行)のため、データは6行目から
 var CC_DATA_END_ROW = 1000; // 手入力で増えていく台帳のため、余裕を持った行数まで集計対象にする
-var CC_WORKER_COL = 14;    // N列(加工者)
-var CC_INSPECTOR_COL = 16; // P列(検査員)
+
+/**
+ * 「客先クレーム管理台帳(CC)」の見出し行(固定行数の範囲)を実際に読み取り、発生日・クレーム内容分類・
+ * 加工者・検査員の列番号とデータ開始行(固定行数+1)を求める(2026-08-18新設)。見出しセルの装飾用
+ * 空白詰めを除去してから部分一致で探すため、台帳のデザインが変わっても見出し文字列さえ同じなら
+ * 追随できる(旧デザイン=結合セルの複数行ヘッダー、新デザイン=buildLedgerSheetV2_の2行ヘッダー、
+ * どちらでも同じロジックで動作することを確認済み)。
+ */
+function resolveCcLedgerColumns_(sheet) {
+  var frozen = sheet.getFrozenRows() || 1;
+  var lastCol = sheet.getLastColumn();
+  var headerRows = sheet.getRange(1, 1, frozen, lastCol).getValues();
+
+  function findCol(name) {
+    for (var r = 0; r < headerRows.length; r++) {
+      for (var c = 0; c < headerRows[r].length; c++) {
+        var text = (headerRows[r][c] || '').toString().replace(/[\s　]+/g, '');
+        if (text.indexOf(name) !== -1) return c + 1;
+      }
+    }
+    return -1;
+  }
+
+  return {
+    dateCol: findCol('発生日'),
+    categoryCol: findCol('クレーム内容分類'),
+    workerCol: findCol('加工者'),
+    inspectorCol: findCol('検査員'),
+    dataStartRow: frozen + 1
+  };
+}
 
 // 「社内不良管理台帳(製造工程)(SK)」の発生日列。2026-08-17、debugInspectDateColumnValidationの実機調査で
 // C列(発生日(品質会議開催日))だけ日付の入力規則が無く表示形式も壊れている(0.###############)ことが
@@ -167,18 +195,47 @@ var KP_CAUSE_ITEMS = [
   { code: 'H', group: 'その他', name: 'その他' }
 ];
 
-// 不適合改善計画書ワークフロー欄(CC・KP(品証)・SK(製造工程)の3台帳で共通の列構成)
-// 「客先クレーム(CC)・社内不良(KP)管理台帳」の改善計画書台帳を参考に、各ステップへ担当者・完了日をセットで持たせる
-var WORKFLOW_HEADERS = [
-  'なぜなぜ分析 担当(品証)', 'なぜなぜ分析 完了日',
-  '改善策の共有 担当(社長)', '改善策の共有 完了日',
-  '図面に貼付 担当(社長)', '図面に貼付 完了日',
-  '加工指示・改善の実施 担当(加工者)', '加工指示・改善の実施 完了日',
-  '効果確認 担当(品証)', '効果確認 完了日',
-  '効果不十分時の差し戻し文書No.(任意)',
-  '水平展開の実施 担当(社長)', '水平展開の実施 完了日',
-  '水平展開の効果確認 担当(社長)', '水平展開の効果確認 完了日'
+// 不適合改善計画書ワークフロー欄(CC・KP(品証)・SK(製造工程)の3台帳で共通)。
+// 【2026-08-18全面リニューアル】旧デザイン(WORKFLOW_HEADERS、月/日プルダウン2列+⇒矢印列)は廃止。
+// ユーザーが旧システム形式で手作りした本物の3台帳をxlsxダウンロードで実機調査した結果、
+// ①ワークフロー完了日が「⇒/月/日」の3列プルダウン(年の記録なし)だった、②「効果確認」は
+// 加工者・品証・社長の3部署がそれぞれ確認する構成だった、と判明(2026-08-17〜18)。
+// これを踏まえ、完了日は発生日と同じ単一の日付セルに、効果確認は3ステップに分けて再設計した
+// (buildLedgerSheetV2_参照)。詳細な調査結果・合意事項はCLAUDE.md参照。
+var LEDGER_WORKFLOW_STEPS = [
+  'なぜなぜ分析', '改善策の共有', '図面に貼付', '改善の実施',
+  '効果確認(加工者)', '効果確認(品証)', '効果確認(社長)',
+  '水平展開の実施', '水平展開の効果確認'
 ];
+var HANKO_CHOICES_ = ['〇', '×'];
+var SHUKKA_KUBUN_CHOICES_ = ['今回製作品', '在庫出荷品'];
+
+/**
+ * このスプレッドシート自身の「データ」シートから、ワークフロー欄の「担当」用の全社員名簿(C列)と
+ * 検査員名簿(I列)を読み取る(2026-08-18新設)。機械名・加工者名は既存通り組織図マスタ
+ * (fetchOrgMasterLists_)を正とするが、「担当」は品証・社長など加工者に限らない全社員が対象になり
+ * うる上、検査員も組織図マスタに項目が無いため、ユーザーが実運用している「データ」シートの
+ * この2列を正とする。「検査員名」等、見出しらしき文字列が値として紛れていた場合は除外する
+ * (WebApi.gsのCC_LABEL_LIKE_VALUES_と同じ対策、実機で混入を確認済み)。
+ */
+function fetchDataSheetLists_(ss) {
+  var sheet = ss.getSheetByName('データ');
+  if (!sheet) return { staff: [], inspectors: [] };
+  var labelLike = ['担当者', '担当者名', '検査員', '検査員名', '加工者', '加工者名'];
+  function uniqueNonBlank(range) {
+    var seen = [], result = [];
+    range.getValues().forEach(function (r) {
+      var v = r[0] ? r[0].toString().trim() : '';
+      if (v && labelLike.indexOf(v) === -1 && seen.indexOf(v) === -1) { seen.push(v); result.push(v); }
+    });
+    return result;
+  }
+  var lastRow = Math.max(sheet.getLastRow(), 2);
+  return {
+    staff: uniqueNonBlank(sheet.getRange(2, 3, lastRow - 1, 1)),      // C列
+    inspectors: uniqueNonBlank(sheet.getRange(2, 9, lastRow - 1, 1))  // I列
+  };
+}
 
 function setupQualityDefectSystem() {
   setupQualityDefectSystemFor_(SpreadsheetApp.openById(SPREADSHEET_ID));
@@ -201,9 +258,10 @@ function setupQualityDefectSystemFor_(ss) {
   buildDefectDashboardSheet_(ss);
 
   var masters = fetchOrgMasterLists_();
-  buildCcLedgerSheet_(ss, masters);
-  buildKpQualityLedgerSheet_(ss, masters);
-  buildSkProcessLedgerSheet_(ss, masters);
+  var dataLists = fetchDataSheetLists_(ss);
+  buildCcLedgerSheetV2_(ss, masters, dataLists, '客先クレーム管理台帳(CC)仮').hideSheet();
+  buildKpLedgerSheetV2_(ss, masters, dataLists, '社内不良管理台帳(品証)(KP)(仮)').hideSheet();
+  buildSkLedgerSheetV2_(ss, masters, dataLists, '社内不良管理台帳(製造工程)(SK)(仮)').hideSheet();
 
   SpreadsheetApp.flush();
   Logger.log('セットアップ完了(' + ss.getName() + '): 不良12シート、集計4シート、グラフ1シート、改善計画書台帳3シートを作成しました。');
@@ -428,9 +486,10 @@ function updateDefectItemMaster() {
   buildDefectDashboardSheet_(ss);   // グラフの元データが上記2シートの構造に依存するため合わせて作り直す
 
   var masters = fetchOrgMasterLists_();
-  buildCcLedgerSheet_(ss, masters);
-  buildKpQualityLedgerSheet_(ss, masters);
-  buildSkProcessLedgerSheet_(ss, masters);
+  var dataLists = fetchDataSheetLists_(ss);
+  buildCcLedgerSheetV2_(ss, masters, dataLists, '客先クレーム管理台帳(CC)仮').hideSheet();
+  buildKpLedgerSheetV2_(ss, masters, dataLists, '社内不良管理台帳(品証)(KP)(仮)').hideSheet();
+  buildSkLedgerSheetV2_(ss, masters, dataLists, '社内不良管理台帳(製造工程)(SK)(仮)').hideSheet();
 
   SpreadsheetApp.flush();
   Logger.log('不良項目マスタを更新しました(' + itemNames.length + '項目)。「不良〇月」12シートのM列プルダウンを更新、'
@@ -806,9 +865,11 @@ function buildClaimSummarySheet_(ss) {
   sheet.setFrozenColumns(labelCols);
 
   var groupColor = buildGroupColorMap_(DEFECT_ITEMS.map(function (item) { return item.group; }));
+  var ccSheet = ss.getSheetByName(CC_LEDGER_SHEET_NAME);
+  var ccCols = ccSheet ? resolveCcLedgerColumns_(ccSheet) : { dateCol: 2, categoryCol: 3, dataStartRow: 2 };
   var ccRef = "'" + CC_LEDGER_SHEET_NAME + "'!";
-  var dateRange = ccRef + '$' + columnToLetter_(CC_DATE_COL) + '$' + CC_DATA_START_ROW + ':$' + columnToLetter_(CC_DATE_COL) + '$' + CC_DATA_END_ROW;
-  var categoryRange = ccRef + '$' + columnToLetter_(CC_CATEGORY_COL) + '$' + CC_DATA_START_ROW + ':$' + columnToLetter_(CC_CATEGORY_COL) + '$' + CC_DATA_END_ROW;
+  var dateRange = ccRef + '$' + columnToLetter_(ccCols.dateCol) + '$' + ccCols.dataStartRow + ':$' + columnToLetter_(ccCols.dateCol) + '$' + CC_DATA_END_ROW;
+  var categoryRange = ccRef + '$' + columnToLetter_(ccCols.categoryCol) + '$' + ccCols.dataStartRow + ':$' + columnToLetter_(ccCols.categoryCol) + '$' + CC_DATA_END_ROW;
 
   sheet.getRange(1, 1, lastRow, lastCol)
     .setBorder(true, true, true, true, true, true, COLOR.GRID_BORDER, SpreadsheetApp.BorderStyle.SOLID);
@@ -879,11 +940,11 @@ function addClaimSummarySheet() {
 }
 
 /**
- * 【1回だけ手動実行】「客先クレーム管理台帳(CC)」のK列(クレーム内容分類)に、DEFECT_ITEMSの
+ * 【1回だけ手動実行】「客先クレーム管理台帳(CC)」のクレーム内容分類列に、DEFECT_ITEMSの
  * 項目名からなるプルダウン(データの入力規則)を追加する(2026-08-17新設)。
- * このシートはユーザーが旧システム形式で手作りしたもので、K列はこれまで自由入力(入力規則なし)
- * だった。実際の入力値は幸いDEFECT_ITEMSの項目名と一致していたが、今後の表記ゆれ(集計漏れ)を
- * 防ぐため、他の台帳(buildImprovementLedgerSheet_)と同じ考え方でプルダウンを追加する。
+ * 【2026-08-18】列位置はresolveCcLedgerColumns_で動的に求めるようにしたため、buildLedgerSheetV2_
+ * 導入後の新デザインに切り替わっても対応できる(新デザインは元々このプルダウンを内蔵しているため
+ * 実質不要になるが、旧デザインのまま運用する場合の保険として残す)。
  * setAllowInvalid(true)にしてあるため、既存の入力値やマスタに無い値を書いても壊れない
  * (プルダウンの候補として出るだけで、直接入力も引き続きできる)。
  */
@@ -892,14 +953,18 @@ function addCcClaimCategoryValidation() {
   var sheet = ss.getSheetByName(CC_LEDGER_SHEET_NAME);
   if (!sheet) throw new Error('「' + CC_LEDGER_SHEET_NAME + '」シートが見つかりません');
 
+  var ccCols = resolveCcLedgerColumns_(sheet);
+  if (ccCols.categoryCol === -1) throw new Error('「クレーム内容分類」列が見つかりません');
+
   var itemNames = DEFECT_ITEMS.map(function (item) { return item.name; });
   var rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(itemNames, true)
     .setAllowInvalid(true)
     .build();
-  var rows = 150; // 台帳の伸びしろとして150行分(buildImprovementLedgerSheet_と同じ考え方)
-  sheet.getRange(CC_DATA_START_ROW, CC_CATEGORY_COL, rows, 1).setDataValidation(rule);
-  Logger.log('「' + CC_LEDGER_SHEET_NAME + '」K列(' + CC_DATA_START_ROW + '〜' + (CC_DATA_START_ROW + rows - 1) + '行目)にプルダウンを追加しました。');
+  var rows = 150; // 台帳の伸びしろとして150行分
+  sheet.getRange(ccCols.dataStartRow, ccCols.categoryCol, rows, 1).setDataValidation(rule);
+  Logger.log('「' + CC_LEDGER_SHEET_NAME + '」' + columnToLetter_(ccCols.categoryCol) + '列(' +
+    ccCols.dataStartRow + '〜' + (ccCols.dataStartRow + rows - 1) + '行目)にプルダウンを追加しました。');
 }
 
 /**
@@ -1378,141 +1443,292 @@ function addDefectDashboardSheet() {
 }
 
 /**
- * 不適合改善計画書台帳(CC・KP(品証)・SK(製造工程)で共通の土台)
- * 左側の発生情報列(leftHeaders)＋共通のWORKFLOW_HEADERS＋備考、で1シートを組み立てる。
- * 台帳番号は手入力(自動採番はしない、これまでの運用を踏襲)。月別分割はせず通し番号の1枚のシートとする。
+ * 改善計画書台帳(CC/KP/SK)共通の土台(2026-08-18、旧buildImprovementLedgerSheet_を全面作り直し)。
+ * 記録情報欄(recordFields)＋LEDGER_WORKFLOW_STEPSの9ステップ(担当+完了日)＋水平展開の判定＋
+ * 差し戻し文書No.＋備考、で1シートを組み立てる。台帳番号は手入力(自動採番はしない、従来通り)。
+ * 【旧デザインからの変更点】①完了日・発生日は単一セル+日付検証(旧:⇒矢印+月/日プルダウンの3列、
+ * 年の記録なし)②担当は全ステップでプルダウン化(旧:一部のみ)③ステップごとに色分け
+ * ④2行ヘッダー(グループ行+列見出し行)で見やすく。
  *
  * @param {string} sheetName シート名
- * @param {string[]} leftHeaders 発生情報部分の列見出し(この関数がWORKFLOW_HEADERS・備考を後ろに連結する)
- * @param {Object} dropdownCols 列見出し名をキーに、その列へ設定するプルダウン選択肢の配列を渡す(省略した列は自由入力)
- * @param {Object} [amountCols] 金額の自動計算をする場合、{qty:'数量列の見出し名', unitPrice:'単価列の見出し名', amount:'金額列の見出し名'} を渡す
+ * @param {Array<{header:string, dropdown?:string[]}>} recordFields 記録情報欄の列定義(先頭から順)
+ * @param {string[]} staffList ワークフロー「担当」列(全9ステップ共通)のプルダウン選択肢
+ * @param {Object} [formulaCols] 金額の自動計算をする場合、{qty:'数量列の見出し名', unitPrice:'単価列の見出し名', amount:'金額列の見出し名'}
  */
-function buildImprovementLedgerSheet_(ss, sheetName, leftHeaders, dropdownCols, amountCols) {
+function buildLedgerSheetV2_(ss, sheetName, recordFields, staffList, formulaCols) {
+  var savedWidths = captureColumnWidths_(ss, sheetName);
   var sheet = replaceSheet_(ss, sheetName);
-  var headers = leftHeaders.concat(WORKFLOW_HEADERS).concat(['備考']);
-  var lastCol = headers.length;
-  var dataRows = 150; // 通し番号の台帳のため月別分割なし。150行を超える場合は手動で行を追加する
 
-  sheet.getRange(1, 1, 1, lastCol).setValues([headers])
-    .setFontWeight('bold').setBackground(COLOR.HEADER_BG).setFontColor(COLOR.HEADER_FONT);
-  sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(2); // 台帳番号・発生日を固定して右側のワークフロー列をスクロールしやすくする
+  var recordHeaders = recordFields.map(function (f) { return f.header; });
+  var recordColCount = recordHeaders.length;
+  var stepStartCol = recordColCount + 1;
+  var tailHeaders = ['水平展開の判定(〇/×)', '差し戻し文書No.(任意)', '備考'];
+  var tailStartCol = stepStartCol + LEDGER_WORKFLOW_STEPS.length * 2;
+  var lastCol = tailStartCol + tailHeaders.length - 1;
+  var dataStartRow = 3; // 1行目=グループ見出し、2行目=列見出し、3行目からデータ
+  var dataRows = 150;   // 通し番号の台帳のため月別分割なし。150行を超える場合は手動で行を追加する
+  var lastDataRow = dataStartRow + dataRows - 1;
+  var stepNumerals = '①②③④⑤⑥⑦⑧⑨';
+  var stepPalette = GROUP_PALETTE.concat(['#FDE2E2']); // GROUP_PALETTE(8色)+1色で9ステップ分を用意
 
-  // データ行に1行おきの縞模様
+  // --- ヘッダー行1(グループ見出し)・行2(列見出し) ---
+  var group1 = new Array(lastCol).fill('');
+  group1[0] = '記録情報';
+  LEDGER_WORKFLOW_STEPS.forEach(function (step, i) {
+    group1[stepStartCol - 1 + i * 2] = stepNumerals.charAt(i) + ' ' + step;
+  });
+  group1[tailStartCol - 1] = '判定・備考';
+
+  var group2 = recordHeaders.slice();
+  LEDGER_WORKFLOW_STEPS.forEach(function () { group2.push('担当', '完了日'); });
+  group2 = group2.concat(tailHeaders);
+
+  sheet.getRange(1, 1, 1, lastCol).setValues([group1]);
+  sheet.getRange(2, 1, 1, lastCol).setValues([group2]);
+
+  // 両方の行に値を書き終えてからマージする(先にマージすると2行目への書き込みでエラーになるため)
+  sheet.getRange(1, 1, 1, recordColCount).merge();
+  LEDGER_WORKFLOW_STEPS.forEach(function (step, i) { sheet.getRange(1, stepStartCol + i * 2, 1, 2).merge(); });
+  sheet.getRange(1, tailStartCol, 1, tailHeaders.length).merge();
+
+  sheet.getRange(1, 1, 2, lastCol).setFontWeight('bold').setBackground(COLOR.HEADER_BG).setFontColor(COLOR.HEADER_FONT);
+  sheet.setFrozenRows(2);
+  sheet.setFrozenColumns(3); // 台帳番号・発生日・関連文書あたりまで固定してワークフロー欄をスクロールしやすくする
+
+  // --- データ行の縞模様(下地。ステップ欄は後でこの上から塗りつぶす) ---
   var bandColors = [];
   for (var r = 0; r < dataRows; r++) {
     var rowColor = (r % 2 === 0) ? '#FFFFFF' : COLOR.BAND_ALT;
-    var row = [];
-    for (var c = 0; c < lastCol; c++) row.push(rowColor);
-    bandColors.push(row);
+    var rowArr = [];
+    for (var c = 0; c < lastCol; c++) rowArr.push(rowColor);
+    bandColors.push(rowArr);
   }
-  sheet.getRange(2, 1, dataRows, lastCol).setBackgrounds(bandColors);
+  sheet.getRange(dataStartRow, 1, dataRows, lastCol).setBackgrounds(bandColors);
 
-  // 列見出し名からプルダウン・日付書式・列幅を判定して適用
-  headers.forEach(function (header, i) {
+  // --- ステップごとの色分け(ヘッダー・データ行とも、ステップ全体を単色で塗る) ---
+  LEDGER_WORKFLOW_STEPS.forEach(function (step, i) {
+    var col = stepStartCol + i * 2;
+    var color = stepPalette[i % stepPalette.length];
+    sheet.getRange(1, col, 2, 2).setBackground(color).setFontColor(COLOR.TOTAL_FONT);
+    sheet.getRange(dataStartRow, col, dataRows, 2).setBackground(color);
+  });
+
+  // --- 記録情報欄: プルダウン・日付列・列幅 ---
+  recordFields.forEach(function (f, i) {
     var col = i + 1;
-    if (dropdownCols[header]) {
-      var rule = SpreadsheetApp.newDataValidation()
-        .requireValueInList(dropdownCols[header], true)
-        .setAllowInvalid(true) // マスタに無い名前(退職・組織変更等)でも記録だけは残せるようにする
-        .build();
-      sheet.getRange(2, col, dataRows, 1).setDataValidation(rule);
+    if (f.dropdown && f.dropdown.length > 0) {
+      var rule = SpreadsheetApp.newDataValidation().requireValueInList(f.dropdown, true).setAllowInvalid(true).build();
+      sheet.getRange(dataStartRow, col, dataRows, 1).setDataValidation(rule);
     }
-    if (/完了日|発生日|開催日/.test(header)) {
-      sheet.getRange(2, col, dataRows, 1).setNumberFormat('yyyy/mm/dd');
-      sheet.setColumnWidth(col, 100);
-    } else if (/詳細|備考/.test(header)) {
-      sheet.setColumnWidth(col, 220);
-    } else if (/担当|関連文書/.test(header)) {
-      sheet.setColumnWidth(col, 130);
-    } else {
+    if (/発生日|開催日/.test(f.header)) {
+      applyLedgerDateColumn_(sheet, col, dataStartRow, dataRows);
       sheet.setColumnWidth(col, 110);
+    } else if (/詳細|備考/.test(f.header)) {
+      sheet.setColumnWidth(col, 220);
+    } else if (/関連文書/.test(f.header)) {
+      sheet.setColumnWidth(col, 150);
+    } else {
+      sheet.setColumnWidth(col, 100);
     }
   });
 
-  // 金額の自動計算(数量×単価)
-  if (amountCols) {
-    var qtyCol = headers.indexOf(amountCols.qty) + 1;
-    var priceCol = headers.indexOf(amountCols.unitPrice) + 1;
-    var amountCol = headers.indexOf(amountCols.amount) + 1;
-    var qtyLetter = columnToLetter_(qtyCol);
-    var priceLetter = columnToLetter_(priceCol);
-    var formulas = [];
-    for (var r = 2; r <= dataRows + 1; r++) {
-      formulas.push(['=IFERROR(' + qtyLetter + r + '*' + priceLetter + r + ',"")']);
+  // --- ワークフロー欄: 担当(全ステップ共通プルダウン)+完了日(単一セル・日付検証) ---
+  var staffRule = SpreadsheetApp.newDataValidation().requireValueInList(staffList, true).setAllowInvalid(true).build();
+  LEDGER_WORKFLOW_STEPS.forEach(function (step, i) {
+    var workerCol = stepStartCol + i * 2;
+    var dateCol = workerCol + 1;
+    sheet.getRange(dataStartRow, workerCol, dataRows, 1).setDataValidation(staffRule);
+    applyLedgerDateColumn_(sheet, dateCol, dataStartRow, dataRows);
+    sheet.setColumnWidth(workerCol, 90);
+    sheet.setColumnWidth(dateCol, 100);
+  });
+
+  // --- 判定(〇/×)・差し戻し文書No.・備考 ---
+  var hankoRule = SpreadsheetApp.newDataValidation().requireValueInList(HANKO_CHOICES_, true).setAllowInvalid(true).build();
+  sheet.getRange(dataStartRow, tailStartCol, dataRows, 1).setDataValidation(hankoRule);
+  sheet.setColumnWidth(tailStartCol, 110);
+  sheet.setColumnWidth(tailStartCol + 1, 150);
+  sheet.setColumnWidth(tailStartCol + 2, 220);
+
+  // --- 金額の自動計算(数量×単価) ---
+  if (formulaCols) {
+    var qtyCol = recordHeaders.indexOf(formulaCols.qty) + 1;
+    var priceCol = recordHeaders.indexOf(formulaCols.unitPrice) + 1;
+    var amountCol = recordHeaders.indexOf(formulaCols.amount) + 1;
+    if (qtyCol > 0 && priceCol > 0 && amountCol > 0) {
+      var qtyLetter = columnToLetter_(qtyCol), priceLetter = columnToLetter_(priceCol);
+      var formulas = [];
+      for (var r2 = dataStartRow; r2 <= lastDataRow; r2++) {
+        formulas.push(['=IFERROR(' + qtyLetter + r2 + '*' + priceLetter + r2 + ',"")']);
+      }
+      sheet.getRange(dataStartRow, amountCol, dataRows, 1).setFormulas(formulas);
     }
-    sheet.getRange(2, amountCol, dataRows, 1).setFormulas(formulas);
   }
 
-  // 表全体に薄いグリッド罫線、ヘッダー下端は太い罫線
-  sheet.getRange(1, 1, dataRows + 1, lastCol)
+  // --- 罫線: 表全体に薄いグリッド、ヘッダー下端・記録情報とワークフローの境目は太線 ---
+  sheet.getRange(1, 1, lastDataRow, lastCol)
     .setBorder(true, true, true, true, true, true, COLOR.GRID_BORDER, SpreadsheetApp.BorderStyle.SOLID);
-  sheet.getRange(1, 1, 1, lastCol)
+  sheet.getRange(1, 1, 2, lastCol)
     .setBorder(null, null, true, null, null, null, COLOR.HEADER_BORDER, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  sheet.getRange(1, recordColCount, lastDataRow, 1)
+    .setBorder(null, null, null, true, null, null, COLOR.HEADER_BORDER, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  LEDGER_WORKFLOW_STEPS.forEach(function (step, i) {
+    var boundaryCol = stepStartCol + i * 2 + 1;
+    sheet.getRange(1, boundaryCol, lastDataRow, 1)
+      .setBorder(null, null, null, true, null, null, COLOR.GRID_BORDER, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  });
 
-  // 見やすさ: シート全体を垂直方向中央揃え、ヘッダー行は水平方向も中央揃え
-  sheet.getRange(1, 1, dataRows + 1, lastCol).setVerticalAlignment('middle');
-  sheet.getRange(1, 1, 1, lastCol).setHorizontalAlignment('center');
+  sheet.getRange(1, 1, lastDataRow, lastCol).setVerticalAlignment('middle').setHorizontalAlignment('center');
+
+  if (savedWidths && savedWidths.length === lastCol) {
+    savedWidths.forEach(function (w, idx) { sheet.setColumnWidth(idx + 1, w); });
+  }
 
   return sheet;
 }
 
-/** 客先クレーム管理台帳(CC) */
-function buildCcLedgerSheet_(ss, masters) {
+/** 日付列に単一セルの日付検証・表示形式・入力ヒントを設定する(fixSkDateColumnValidationと同じ考え方、2026-08-18) */
+function applyLedgerDateColumn_(sheet, col, startRow, rows) {
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireDate()
+    .setAllowInvalid(true)
+    .setHelpText('日付を入力してください(例: 2026/8/17)。セルを選択すると右端に出るカレンダーアイコンからも選べます。')
+    .build();
+  sheet.getRange(startRow, col, rows, 1).setDataValidation(rule);
+  sheet.getRange(startRow, col, rows, 1).setNumberFormat('yyyy"年"m"月"d"日"');
+}
+
+/** 客先クレーム管理台帳(CC)。2026-08-18リニューアル、フィールド構成は実機のxlsxダウンロードから調査したもの */
+function buildCcLedgerSheetV2_(ss, masters, dataLists, sheetName) {
   var itemNames = DEFECT_ITEMS.map(function (item) { return item.name; });
-  var leftHeaders = [
-    '台帳番号(CC)', '発生日(受領日)', '関連文書(客先からの連絡票等)',
-    '客先名', '品番(図番)', 'クレーム内容分類', 'クレーム内容詳細',
-    'NG数(納入数)', '加工者', '機械名(機械番号)', '検査員', '出荷区分', '単価', '金額'
+  var recordFields = [
+    { header: '台帳番号(CC)' },
+    { header: '発生日(受領日)' },
+    { header: '関連文書(客先からの連絡票等)' },
+    { header: '関連文書(その他文書・ロット番号)' },
+    { header: '客先名' },
+    { header: '品番' },
+    { header: '品名' },
+    { header: 'クレーム内容分類', dropdown: itemNames },
+    { header: 'クレーム内容詳細' },
+    { header: 'NG数' },
+    { header: '納入数' },
+    { header: '加工者', dropdown: masters.kakosha },
+    { header: '機械名', dropdown: masters.kishu },
+    { header: '機械番号' },
+    { header: '検査員', dropdown: dataLists.inspectors },
+    { header: '出荷区分', dropdown: SHUKKA_KUBUN_CHOICES_ },
+    { header: '単価' },
+    { header: '金額' }
   ];
-  var dropdownCols = {
-    'クレーム内容分類': itemNames,
-    '加工者': masters.kakosha,
-    '機械名(機械番号)': masters.kishu,
-    '加工指示・改善の実施 担当(加工者)': masters.kakosha
-  };
-  var sheet = buildImprovementLedgerSheet_(ss, '客先クレーム管理台帳(CC)仮', leftHeaders, dropdownCols,
-    { qty: 'NG数(納入数)', unitPrice: '単価', amount: '金額' });
-  sheet.hideSheet(); // 2026-08-12: 3台帳とも方針未確定のため非表示にしておく。2026-08-15: ユーザーが手作業で
-  // 旧システム形式の本物(「客先クレーム管理台帳(CC)」、仮の付かない名前)を別途作成したため、名前の衝突を
-  // 避けるためこちら(コード生成の簡易版)は「仮」を付けて区別する。ユーザーの希望でこちらも作成は継続する。
+  return buildLedgerSheetV2_(ss, sheetName, recordFields, dataLists.staff,
+    { qty: 'NG数', unitPrice: '単価', amount: '金額' });
 }
 
 /** 社内不良管理台帳(品証)(KP)。品証の検査で見つかった社内不良の改善計画書進捗を管理する(不良〇月とは別の台帳) */
-function buildKpQualityLedgerSheet_(ss, masters) {
+function buildKpLedgerSheetV2_(ss, masters, dataLists, sheetName) {
   var itemNames = DEFECT_ITEMS.map(function (item) { return item.name; });
-  var leftHeaders = [
-    '台帳番号(KP)', '発生日', '関連文書',
-    '客先名', '品番(図番)', '不良内容分類', '不良内容詳細',
-    '不良数(加工数)', '加工者', '機械名(機械番号)', '検査員', '単価', '金額'
+  var recordFields = [
+    { header: '台帳番号(KP)' },
+    { header: '発生日(受領日)' },
+    { header: '関連文書(その他文書(客先等))' },
+    { header: '客先名' },
+    { header: '品番' },
+    { header: '品名' },
+    { header: 'クレーム内容分類', dropdown: itemNames },
+    { header: 'クレーム内容詳細' },
+    { header: '不良数' },
+    { header: '加工数' },
+    { header: '加工者', dropdown: masters.kakosha },
+    { header: '機械名', dropdown: masters.kishu },
+    { header: '機械番号' },
+    { header: '検査員', dropdown: dataLists.inspectors },
+    { header: '単価' },
+    { header: '合計' }
   ];
-  var dropdownCols = {
-    '不良内容分類': itemNames,
-    '加工者': masters.kakosha,
-    '機械名(機械番号)': masters.kishu,
-    '加工指示・改善の実施 担当(加工者)': masters.kakosha
-  };
-  var sheet = buildImprovementLedgerSheet_(ss, '社内不良管理台帳(品証)(KP)(仮)', leftHeaders, dropdownCols,
-    { qty: '不良数(加工数)', unitPrice: '単価', amount: '金額' });
-  sheet.hideSheet(); // 2026-08-15: 名前の衝突回避のため「仮」を付けている(buildCcLedgerSheet_のコメント参照)
+  return buildLedgerSheetV2_(ss, sheetName, recordFields, dataLists.staff,
+    { qty: '不良数', unitPrice: '単価', amount: '合計' });
 }
 
 /** 社内不良管理台帳(製造工程)(SK)。加工者自身がその場で申告する工程内不良の改善計画書進捗を管理する */
-function buildSkProcessLedgerSheet_(ss, masters) {
+function buildSkLedgerSheetV2_(ss, masters, dataLists, sheetName) {
   var itemNames = DEFECT_ITEMS.map(function (item) { return item.name; });
-  var leftHeaders = [
-    '台帳番号(SK)', '発生日(品質会議開催日)', '関連文書(製造工程不良票・年月)',
-    '品番(図番)', '不良内容分類(層別区分)', '不良内容詳細',
-    '不良数', '加工者', '機械名(機械番号)'
+  var recordFields = [
+    { header: '台帳番号(SK)' },
+    { header: '発生日(品質会議開催日)' },
+    { header: '関連文書(製造工程不良一覧)' },
+    { header: '関連文書(その他文書(客先等))' },
+    { header: '客先名' },
+    { header: '品番' },
+    { header: '品名' },
+    { header: '不良層別区分', dropdown: itemNames },
+    { header: '不良詳細' },
+    { header: '不良数' },
+    { header: '加工者', dropdown: masters.kakosha },
+    { header: '機械名', dropdown: masters.kishu },
+    { header: '機械番号' }
   ];
-  var dropdownCols = {
-    '不良内容分類(層別区分)': itemNames,
-    '加工者': masters.kakosha,
-    '機械名(機械番号)': masters.kishu,
-    '加工指示・改善の実施 担当(加工者)': masters.kakosha
-  };
-  var sheet = buildImprovementLedgerSheet_(ss, '社内不良管理台帳(製造工程)(SK)(仮)', leftHeaders, dropdownCols, null);
-  sheet.hideSheet(); // 2026-08-15: 名前の衝突回避のため「仮」を付けている(buildCcLedgerSheet_のコメント参照)
+  return buildLedgerSheetV2_(ss, sheetName, recordFields, dataLists.staff, null);
+}
+
+/**
+ * 【1回だけ手動実行】CC/KP/SK台帳のリニューアル版を「（新）」を付けたシート名で追加する(2026-08-18)。
+ * 現在稼働中の本物の台帳(客先クレーム管理台帳(CC)等)には一切触れない。内容を確認し、
+ * 問題なければ swapToRedesignedLedgers で正式名称に切り替える。
+ */
+function addRedesignedLedgers() {
+  var ss = getCurrentYearSpreadsheet_();
+  var masters = fetchOrgMasterLists_();
+  var dataLists = fetchDataSheetLists_(ss);
+  buildCcLedgerSheetV2_(ss, masters, dataLists, CC_LEDGER_SHEET_NAME + '（新）');
+  buildKpLedgerSheetV2_(ss, masters, dataLists, '社内不良管理台帳(品証)(KP)（新）');
+  buildSkLedgerSheetV2_(ss, masters, dataLists, SK_LEDGER_SHEET_NAME + '（新）');
+  SpreadsheetApp.flush();
+  Logger.log('リニューアル版の3台帳を「（新）」付きシート名で追加しました。内容を確認し、問題なければ swapToRedesignedLedgers を実行してください。');
+}
+
+/**
+ * 【1回だけ手動実行・要ユーザー確認後】addRedesignedLedgersで作った「（新）」付き台帳を正式名称に
+ * 切り替える(2026-08-18)。現行の本物の台帳は削除せず「（旧）」を付けて非表示のまま残す
+ * (中身を確認してから、不要ならユーザーが手動で削除する)。
+ */
+function swapToRedesignedLedgers() {
+  var ss = getCurrentYearSpreadsheet_();
+  var pairs = [
+    { officialName: CC_LEDGER_SHEET_NAME },
+    { officialName: '社内不良管理台帳(品証)(KP)' },
+    { officialName: SK_LEDGER_SHEET_NAME }
+  ];
+  var log = [];
+  pairs.forEach(function (p) {
+    var newSheet = ss.getSheetByName(p.officialName + '（新）');
+    if (!newSheet) { log.push(p.officialName + ': 「（新）」シートが見つからないためスキップ(先にaddRedesignedLedgersを実行してください)'); return; }
+    var oldSheet = ss.getSheetByName(p.officialName);
+    if (oldSheet) {
+      oldSheet.setName(p.officialName + '（旧）');
+      oldSheet.hideSheet();
+    }
+    newSheet.setName(p.officialName);
+    log.push(p.officialName + ': 切り替えました' + (oldSheet ? '(旧シートは「' + p.officialName + '（旧）」として非表示で残しています)' : ''));
+  });
+  Logger.log(log.join('\n'));
+}
+
+/**
+ * 【1回だけ手動実行】旧デザインのコード生成「仮」台帳3枚(客先クレーム管理台帳(CC)仮 等)を削除する。
+ * リニューアル版(buildLedgerSheetV2_ベース)を導入したため、旧デザインの仮シートは不要と判断
+ * (2026-08-18、ユーザー確認済み)。setupQualityDefectSystemFor_は今後もリニューアル版の仮シートを
+ * 自動生成するため、削除しても支障はない。
+ */
+function removeOldTemporaryLedgerSheets() {
+  var ss = getCurrentYearSpreadsheet_();
+  var names = ['客先クレーム管理台帳(CC)仮', '社内不良管理台帳(品証)(KP)(仮)', '社内不良管理台帳(製造工程)(SK)(仮)'];
+  var removed = [];
+  names.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    if (sheet) { ss.deleteSheet(sheet); removed.push(name); }
+  });
+  Logger.log(removed.length > 0 ? '削除しました: ' + removed.join('、') : '該当するシートが見つかりませんでした。');
 }
 
 /** 既存の同名シートを削除してから新規作成する */

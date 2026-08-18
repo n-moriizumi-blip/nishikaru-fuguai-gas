@@ -324,11 +324,12 @@ function buildDashboardData_() {
   var kakoshaCount = {}, kensainCount = {};
   var ccSheetForRanking = ss.getSheetByName(CC_LEDGER_SHEET_NAME);
   if (ccSheetForRanking) {
+    var ccCols = resolveCcLedgerColumns_(ccSheetForRanking);
     var ccLastRow = ccSheetForRanking.getLastRow();
-    var ccRows = Math.max(ccLastRow - CC_DATA_START_ROW + 1, 0);
-    if (ccRows > 0) {
-      var kakoshaValues = ccSheetForRanking.getRange(CC_DATA_START_ROW, CC_WORKER_COL, ccRows, 1).getValues();
-      var kensainValues = ccSheetForRanking.getRange(CC_DATA_START_ROW, CC_INSPECTOR_COL, ccRows, 1).getValues();
+    var ccRows = Math.max(ccLastRow - ccCols.dataStartRow + 1, 0);
+    if (ccRows > 0 && ccCols.workerCol !== -1 && ccCols.inspectorCol !== -1) {
+      var kakoshaValues = ccSheetForRanking.getRange(ccCols.dataStartRow, ccCols.workerCol, ccRows, 1).getValues();
+      var kensainValues = ccSheetForRanking.getRange(ccCols.dataStartRow, ccCols.inspectorCol, ccRows, 1).getValues();
       kakoshaValues.forEach(function (r) {
         var v = r[0] ? r[0].toString().trim() : '';
         if (v && CC_LABEL_LIKE_VALUES_.indexOf(v) === -1) kakoshaCount[v] = (kakoshaCount[v] || 0) + 1;
