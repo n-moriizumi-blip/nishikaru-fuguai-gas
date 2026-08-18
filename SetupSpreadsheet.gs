@@ -1565,15 +1565,22 @@ function buildLedgerSheetV2_(ss, sheetName, recordFields, staffList, formulaCols
   sheet.getRange(2, 1, 1, lastCol).setValues([group2]);
 
   // 両方の行に値を書き終えてからマージする(先にマージすると2行目への書き込みでエラーになるため)。
-  // 【2026-08-18訂正】列固定と結合セルは「固定範囲が結合セル全体と一致しない限り併用できない」ため、
-  // 列固定はしない方針にした(ユーザー合意)。列固定が無ければ制約が無いため、記録情報欄も
-  // ステップ欄・判定備考欄と同じく全列を結合してグループ見出しらしく見せる。
-  sheet.getRange(1, 1, 1, recordColCount).merge();
+  // 【2026-08-19再訂正】品番までの列固定を復活させたため、記録情報欄の結合を品番の前後で分割する
+  // (結合セルが固定境界をまたぐと「結合されたセルの一部だけを含む列を固定することはできません」
+  // エラーになるため。2026-08-18に列固定ごと廃止した際の制約と同じもの)。
+  var freezeCol = recordHeaders.indexOf('品番') + 1; // 品番が無い台帳では0のまま(固定なし)
+  if (freezeCol > 0 && freezeCol < recordColCount) {
+    sheet.getRange(1, 1, 1, freezeCol).merge();
+    sheet.getRange(1, freezeCol + 1, 1, recordColCount - freezeCol).merge();
+  } else {
+    sheet.getRange(1, 1, 1, recordColCount).merge();
+  }
   LEDGER_WORKFLOW_STEPS.forEach(function (step, i) { sheet.getRange(1, stepStartCol + i * 2, 1, 2).merge(); });
   sheet.getRange(1, tailStartCol, 1, tailHeaders.length).merge();
 
   sheet.getRange(1, 1, 2, lastCol).setFontWeight('bold').setBackground(COLOR.HEADER_BG).setFontColor(COLOR.HEADER_FONT);
-  sheet.setFrozenRows(2); // 列固定はしない(2026-08-18、ユーザー合意)。一番左のまま。
+  sheet.setFrozenRows(2);
+  if (freezeCol > 0) sheet.setFrozenColumns(freezeCol); // 品番の右端で列固定(2026-08-19、ユーザー依頼で復活)
 
   // --- データ行の縞模様(下地。ステップ欄は後でこの上から塗りつぶす) ---
   var bandColors = [];
@@ -1673,8 +1680,6 @@ function buildCcLedgerSheetV2_(ss, masters, dataLists, sheetName) {
   var recordFields = [
     { header: '台帳番号(CC)' },
     { header: '発生日(受領日)' },
-    { header: '関連文書(客先からの連絡票等)' },
-    { header: '関連文書(その他文書・ロット番号)' },
     { header: '客先名' },
     { header: '品番' },
     { header: '品名' },
@@ -1688,10 +1693,12 @@ function buildCcLedgerSheetV2_(ss, masters, dataLists, sheetName) {
     { header: '検査員', dropdown: dataLists.inspectors },
     { header: '出荷区分', dropdown: SHUKKA_KUBUN_CHOICES_ },
     { header: '単価' },
-    { header: '金額' }
+    { header: '合計金額' },
+    { header: '関連文書(客先からの連絡票等)' },
+    { header: '関連文書(その他文書・ロット番号)' }
   ];
   return buildLedgerSheetV2_(ss, sheetName, recordFields, dataLists.staff,
-    { qty: 'NG数', unitPrice: '単価', amount: '金額' });
+    { qty: 'NG数', unitPrice: '単価', amount: '合計金額' });
 }
 
 /** 社内不良管理台帳(品証)(KP)。品証の検査で見つかった社内不良の改善計画書進捗を管理する(不良〇月とは別の台帳) */
@@ -1700,7 +1707,6 @@ function buildKpLedgerSheetV2_(ss, masters, dataLists, sheetName) {
   var recordFields = [
     { header: '台帳番号(KP)' },
     { header: '発生日(受領日)' },
-    { header: '関連文書(その他文書(客先等))' },
     { header: '客先名' },
     { header: '品番' },
     { header: '品名' },
@@ -1713,10 +1719,11 @@ function buildKpLedgerSheetV2_(ss, masters, dataLists, sheetName) {
     { header: '機械番号' },
     { header: '検査員', dropdown: dataLists.inspectors },
     { header: '単価' },
-    { header: '合計' }
+    { header: '合計金額' },
+    { header: '関連文書(その他文書(客先等))' }
   ];
   return buildLedgerSheetV2_(ss, sheetName, recordFields, dataLists.staff,
-    { qty: '不良数', unitPrice: '単価', amount: '合計' });
+    { qty: '不良数', unitPrice: '単価', amount: '合計金額' });
 }
 
 /** 社内不良管理台帳(製造工程)(SK)。加工者自身がその場で申告する工程内不良の改善計画書進捗を管理する */
@@ -1725,8 +1732,6 @@ function buildSkLedgerSheetV2_(ss, masters, dataLists, sheetName) {
   var recordFields = [
     { header: '台帳番号(SK)' },
     { header: '発生日(品質会議開催日)' },
-    { header: '関連文書(製造工程不良一覧)' },
-    { header: '関連文書(その他文書(客先等))' },
     { header: '客先名' },
     { header: '品番' },
     { header: '品名' },
@@ -1735,7 +1740,9 @@ function buildSkLedgerSheetV2_(ss, masters, dataLists, sheetName) {
     { header: '不良数' },
     { header: '加工者', dropdown: masters.kakosha },
     { header: '機械名', dropdown: masters.kishu },
-    { header: '機械番号' }
+    { header: '機械番号' },
+    { header: '関連文書(製造工程不良一覧)' },
+    { header: '関連文書(その他文書(客先等))' }
   ];
   return buildLedgerSheetV2_(ss, sheetName, recordFields, dataLists.staff, null);
 }
@@ -1754,6 +1761,87 @@ function addRedesignedLedgers() {
   buildSkLedgerSheetV2_(ss, masters, dataLists, SK_LEDGER_SHEET_NAME + '（新）');
   SpreadsheetApp.flush();
   Logger.log('リニューアル版の3台帳を「（新）」付きシート名で追加しました。内容を確認し、問題なければ swapToRedesignedLedgers を実行してください。');
+}
+
+/**
+ * 【1回だけ手動実行】CC/KP/SK台帳の列並び替え(関連文書を金額/合計の右へ、見出しを「合計金額」に統一、
+ * 品番の右で列固定)を、既存の入力済みデータを保持したまま本番シートへ直接反映する(2026-08-19)。
+ * addRedesignedLedgers→swapToRedesignedLedgersの方式(正式シートが空になり手作業でのデータ移し替えが
+ * 必要)は使わず、旧シートのデータを見出し名で新レイアウトへ自動的に対応付けて書き戻す。
+ */
+function migrateLedgerColumnLayout20260819() {
+  var ss = getCurrentYearSpreadsheet_();
+  var masters = fetchOrgMasterLists_();
+  var dataLists = fetchDataSheetLists_(ss);
+
+  // 記録情報欄の列数(=recordFields.length)は並び替え前後で変わらない(移動のみ・増減なし)ため固定値で渡す
+  migrateOneLedger_(ss, CC_LEDGER_SHEET_NAME, 18, function (name) { return buildCcLedgerSheetV2_(ss, masters, dataLists, name); });
+  migrateOneLedger_(ss, '社内不良管理台帳(品証)(KP)', 16, function (name) { return buildKpLedgerSheetV2_(ss, masters, dataLists, name); });
+  migrateOneLedger_(ss, SK_LEDGER_SHEET_NAME, 13, function (name) { return buildSkLedgerSheetV2_(ss, masters, dataLists, name); });
+
+  SpreadsheetApp.flush();
+  Logger.log('CC/KP/SK台帳の列並び替えが完了しました。');
+}
+
+/**
+ * 1台帳分の移行本体。①旧シートの記録情報欄(recordColCount列分)とそれ以降(ワークフロー欄・判定備考欄)を
+ * 退避 → ②新レイアウトでシートを再構築(buildXxxLedgerSheetV2_を実行、既存シートは削除され作り直される) →
+ * ③記録情報欄は見出し名で対応付けて書き戻す(並び替え・改名に追随するため)、それ以降は列数が変わらないため
+ * 位置そのままコピー。金額/合計→合計金額は数式列なので書き戻さず、再構築後の数式のまま使う。
+ */
+function migrateOneLedger_(ss, sheetName, recordColCount, rebuildFn) {
+  var oldSheet = ss.getSheetByName(sheetName);
+  if (!oldSheet) { Logger.log(sheetName + ': シートが見つからないためスキップ'); return; }
+
+  var headerRow = 2; // 1行目=グループ見出し、2行目=列見出し(buildLedgerSheetV2_と同じ前提)
+  var oldLastRow = oldSheet.getLastRow();
+  var oldLastCol = oldSheet.getLastColumn();
+  if (oldLastRow <= headerRow) {
+    rebuildFn(sheetName);
+    Logger.log(sheetName + ': 既存データが無いため並び替えのみ実施しました。');
+    return;
+  }
+
+  var dataRowCount = oldLastRow - headerRow;
+  var oldRecordHeaders = oldSheet.getRange(headerRow, 1, 1, recordColCount).getValues()[0]
+    .map(function (h) { return (h || '').toString().trim(); });
+  var oldRecordData = oldSheet.getRange(headerRow + 1, 1, dataRowCount, recordColCount).getValues();
+  var restData = (oldLastCol > recordColCount)
+    ? oldSheet.getRange(headerRow + 1, recordColCount + 1, dataRowCount, oldLastCol - recordColCount).getValues()
+    : null;
+
+  // 実データがある最終行(記録情報欄のいずれかの列が空でない最後の行)を求める
+  var lastFilledIdx = -1;
+  for (var r = 0; r < oldRecordData.length; r++) {
+    if (oldRecordData[r].some(function (v) { return v !== '' && v !== null; })) lastFilledIdx = r;
+  }
+  var filledCount = lastFilledIdx + 1;
+
+  var newSheet = rebuildFn(sheetName);
+
+  if (filledCount > 0) {
+    var newRecordHeaders = newSheet.getRange(headerRow, 1, 1, recordColCount).getValues()[0]
+      .map(function (h) { return (h || '').toString().trim(); });
+    var renameMap = { '金額': '合計金額', '合計': '合計金額' };
+
+    oldRecordHeaders.forEach(function (oldHeader, oldColIdx) {
+      if (!oldHeader) return;
+      var targetHeader = renameMap[oldHeader] || oldHeader;
+      if (targetHeader === '合計金額') return; // 数式列なので書き戻さない(再構築後の数式のまま)
+      var newColIdx = newRecordHeaders.indexOf(targetHeader);
+      if (newColIdx === -1) return;
+      var colValues = [];
+      for (var r2 = 0; r2 < filledCount; r2++) colValues.push([oldRecordData[r2][oldColIdx]]);
+      newSheet.getRange(headerRow + 1, newColIdx + 1, filledCount, 1).setValues(colValues);
+    });
+
+    if (restData) {
+      newSheet.getRange(headerRow + 1, recordColCount + 1, filledCount, restData[0].length)
+        .setValues(restData.slice(0, filledCount));
+    }
+  }
+
+  Logger.log(sheetName + ': ' + filledCount + '件のデータを移行しました。');
 }
 
 /**
