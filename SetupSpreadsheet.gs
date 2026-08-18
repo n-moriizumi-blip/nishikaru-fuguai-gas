@@ -677,6 +677,39 @@ function moveKizuGeninColumnToN() {
 }
 
 /**
+ * 【1回だけ手動実行・2026-08-18】キズ原因(N列)だけ処置区分による行の色分け(社内不良(KP)=薄青／
+ * 差し戻し=薄橙)が効いていない不具合の修正用。条件付き書式のルールはセル範囲を固定で持っており、
+ * moveKizuGeninColumnToNで列を移動しても追従しない(V・W列を除外していた古い範囲のまま残っていた
+ * ため、移動後のN列がその対象範囲に正しく含まれていなかった)。現在の列構成(送信ID列だけ対象外)で
+ * ルールを作り直す。
+ */
+function fixMonthlySheetRowColoring() {
+  var ss = getCurrentYearSpreadsheet_();
+  var log = [];
+  MONTHS.forEach(function (month) {
+    var sheet = ss.getSheetByName('不良' + month + '月');
+    if (!sheet) return;
+    var lastCol = sheet.getLastColumn();
+    var fullRowRange = sheet.getRange(2, 1, 114, lastCol - 1); // 送信ID(最終列)だけ対象外
+    var kpRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=$B2="社内不良(KP)"')
+      .setBackground(COLOR.KP_BG)
+      .setFontColor(COLOR.KP_FONT)
+      .setRanges([fullRowRange])
+      .build();
+    var reworkRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=$B2="差し戻し"')
+      .setBackground(COLOR.REWORK_BG)
+      .setFontColor(COLOR.REWORK_FONT)
+      .setRanges([fullRowRange])
+      .build();
+    sheet.setConditionalFormatRules([kpRule, reworkRule]);
+    log.push('不良' + month + '月: 条件付き書式を作り直しました');
+  });
+  Logger.log(log.join('\n'));
+}
+
+/**
  * 【診断用・手動実行】現在の年度のスプレッドシートに実際にあるシートを一覧表示する(2026-08-15新設)。
  * ユーザーが直接シートを追加・変更した場合に、コード側(setupQualityDefectSystemFor_等)が把握している
  * 構成とのズレを確認するために使う。シート名・表示/非表示・行数・列数をログに出す。
