@@ -1,3 +1,6 @@
 # 別リポジトリで管理中(GitHub Pages配信の各アプリ)
 index.html
 dashboard.html
+
+# Obsidianメモ(社内情報のためpublicリポジトリには含めない、他プロジェクトと同じallowlist方針)
+notes/
