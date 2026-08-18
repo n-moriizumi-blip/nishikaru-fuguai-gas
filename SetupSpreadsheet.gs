@@ -137,9 +137,11 @@ var CC_DATA_END_ROW = 1000; // 手入力で増えていく台帳のため、余�
 /**
  * 「客先クレーム管理台帳(CC)」の見出し行(固定行数の範囲)を実際に読み取り、発生日・クレーム内容分類・
  * 加工者・検査員の列番号とデータ開始行(固定行数+1)を求める(2026-08-18新設)。見出しセルの装飾用
- * 空白詰めを除去してから部分一致で探すため、台帳のデザインが変わっても見出し文字列さえ同じなら
- * 追随できる(旧デザイン=結合セルの複数行ヘッダー、新デザイン=buildLedgerSheetV2_の2行ヘッダー、
- * どちらでも同じロジックで動作することを確認済み)。
+ * 空白詰めを除去してから探すため、台帳のデザインが変わっても見出し文字列さえ同じなら追随できる
+ * (旧デザイン=結合セルの複数行ヘッダー、新デザイン=buildLedgerSheetV2_の2行ヘッダー、どちらでも動作)。
+ * 【2026-08-18実機バグ修正】部分一致だけだと、新デザインのワークフロー欄の見出し「効果確認(加工者)」に
+ * 「加工者」が部分一致してしまい、記録情報欄の本来の「加工者」列より先に(誤って)ヒットしていた。
+ * 完全一致を優先し、見つからない場合だけ部分一致にフォールバックするよう修正。
  */
 function resolveCcLedgerColumns_(sheet) {
   var frozen = sheet.getFrozenRows() || 1;
@@ -147,13 +149,15 @@ function resolveCcLedgerColumns_(sheet) {
   var headerRows = sheet.getRange(1, 1, frozen, lastCol).getValues();
 
   function findCol(name) {
+    var partialMatchCol = -1;
     for (var r = 0; r < headerRows.length; r++) {
       for (var c = 0; c < headerRows[r].length; c++) {
         var text = (headerRows[r][c] || '').toString().replace(/[\s　]+/g, '');
-        if (text.indexOf(name) !== -1) return c + 1;
+        if (text === name) return c + 1; // 完全一致は即採用
+        if (partialMatchCol === -1 && text.indexOf(name) !== -1) partialMatchCol = c + 1;
       }
     }
-    return -1;
+    return partialMatchCol; // 完全一致が無ければ、最初に見つかった部分一致にフォールバック
   }
 
   return {

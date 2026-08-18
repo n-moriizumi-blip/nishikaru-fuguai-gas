@@ -397,6 +397,43 @@ function debugInspectClaimSummaryRanges() {
 }
 
 /**
+ * 【調査用・書き込みなし】リニューアル後の「客先クレーム管理台帳(CC)」に対して、
+ * resolveCcLedgerColumns_(SetupSpreadsheet.gs)が実際にどの列を発生日・クレーム内容分類・加工者・
+ * 検査員と判定しているか、加工者列・検査員列に実際どんな値が入っているかをログに出す(2026-08-18新設)。
+ * 「加工者別件数が反映されない」といった不具合の際、①列の取り違え②データが本当に入っているか
+ * ③見出し文字列のズレ、のどこが原因かを1回で切り分けるための調査用。
+ */
+function debugInspectCcLedgerData() {
+  var ss = getCurrentYearSpreadsheet_();
+  var sheet = ss.getSheetByName(CC_LEDGER_SHEET_NAME);
+  if (!sheet) { Logger.log('「' + CC_LEDGER_SHEET_NAME + '」シートが見つかりません'); return; }
+
+  var cols = resolveCcLedgerColumns_(sheet);
+  var log = [];
+  log.push('列の判定結果: 発生日=' + (cols.dateCol !== -1 ? columnToLetter_(cols.dateCol) + '列' : '見つからず') +
+    ' / クレーム内容分類=' + (cols.categoryCol !== -1 ? columnToLetter_(cols.categoryCol) + '列' : '見つからず') +
+    ' / 加工者=' + (cols.workerCol !== -1 ? columnToLetter_(cols.workerCol) + '列' : '見つからず') +
+    ' / 検査員=' + (cols.inspectorCol !== -1 ? columnToLetter_(cols.inspectorCol) + '列' : '見つからず') +
+    ' / データ開始行=' + cols.dataStartRow);
+
+  var lastRow = sheet.getLastRow();
+  log.push('シートの最終行(getLastRow)=' + lastRow);
+
+  if (cols.workerCol !== -1 && lastRow >= cols.dataStartRow) {
+    var workerValues = sheet.getRange(cols.dataStartRow, cols.workerCol, lastRow - cols.dataStartRow + 1, 1).getValues();
+    var nonBlankWorkers = workerValues.filter(function (r) { return r[0]; }).map(function (r) { return r[0]; });
+    log.push('加工者列の非空欄セル数=' + nonBlankWorkers.length + '、先頭10件の値: ' + JSON.stringify(nonBlankWorkers.slice(0, 10)));
+  }
+  if (cols.inspectorCol !== -1 && lastRow >= cols.dataStartRow) {
+    var inspectorValues = sheet.getRange(cols.dataStartRow, cols.inspectorCol, lastRow - cols.dataStartRow + 1, 1).getValues();
+    var nonBlankInspectors = inspectorValues.filter(function (r) { return r[0]; }).map(function (r) { return r[0]; });
+    log.push('検査員列の非空欄セル数=' + nonBlankInspectors.length + '、先頭10件の値: ' + JSON.stringify(nonBlankInspectors.slice(0, 10)));
+  }
+
+  Logger.log(log.join('\n'));
+}
+
+/**
  * 【調査用・書き込みなし】新システム側(現行年度)の「客先クレーム管理台帳(CC)」(ユーザーが
  * 旧システム形式で手作りした本物のシート)の実際のヘッダー行・列位置・データ数行、および
  * 「データ」シートの「クレーム内容分類」関連プルダウン候補をログに出す。
