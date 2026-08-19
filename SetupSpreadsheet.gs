@@ -710,6 +710,37 @@ function fixMonthlySheetRowColoring() {
 }
 
 /**
+ * 【診断用・手動実行・2026-08-19】`fixMonthlySheetRowColoring`実行後も「不良8月」でL列(修正数)
+ * 付近の背景色がズレて見えるという報告への調査用。条件付き書式のルールが実際にどの範囲を
+ * 対象にしているか(A1形式)と、L2・M2・O2セルの実際の背景色(条件付き書式適用後の見た目の色)を
+ * ログに出す。これで「範囲にL・O列が含まれていない」のか「範囲は正しいが別の原因」なのかを切り分ける。
+ */
+function debugMonthlySheetColoring() {
+  var ss = getCurrentYearSpreadsheet_();
+  var sheet = ss.getSheetByName('不良8月');
+  if (!sheet) { Logger.log('「不良8月」が見つかりません'); return; }
+
+  var log = [];
+  log.push('lastColumn=' + sheet.getLastColumn());
+
+  var rules = sheet.getConditionalFormatRules();
+  log.push('条件付き書式ルール数=' + rules.length);
+  rules.forEach(function (rule, i) {
+    var ranges = rule.getRanges();
+    ranges.forEach(function (r) {
+      log.push('ルール' + i + ' 範囲=' + r.getA1Notation());
+    });
+  });
+
+  ['B2', 'K2', 'L2', 'M2', 'N2', 'O2', 'P2'].forEach(function (a1) {
+    var cell = sheet.getRange(a1);
+    log.push(a1 + ' 値=' + cell.getValue() + ' 背景色(見た目)=' + cell.getBackground());
+  });
+
+  Logger.log(log.join('\n'));
+}
+
+/**
  * 【1回だけ手動実行・2026-08-19】既存の「不良〇月」12シートに「修正数」列(L列、良品数の右)を
  * 追加する。差し戻し入力時、いくつ修正できたかを記録全体で1つ記録するための単純な項目
  * (良品数の自動計算式には使わない)。列構成をコード側(buildDefectMonthlySheet_)で変更したのに
