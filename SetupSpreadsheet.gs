@@ -800,6 +800,31 @@ function rebuildSummarySheetsAfterShuseisu20260819() {
 }
 
 /**
+ * 【診断用・手動実行・2026-08-19】ダッシュボードの月別不良個数・不良件数にデータが反映されない、
+ * 月別不良金額の8月の数字がおかしい、という報告への調査用。「月次サマリー」シートのA列(見出し)と
+ * 8月列(I列)の値をすべてログに出し、行の見出し・数式の計算結果が想定通りかを確認する。
+ */
+function debugMonthlySummaryRows() {
+  var ss = getCurrentYearSpreadsheet_();
+  var sheet = ss.getSheetByName('月次サマリー');
+  if (!sheet) { Logger.log('「月次サマリー」が見つかりません'); return; }
+
+  var lastRow = sheet.getLastRow();
+  var labels = sheet.getRange(1, 1, lastRow, 1).getValues();
+  var augustCol = 1 + MONTHS.indexOf(8); // MONTHSはA〜Lが6〜5月の順。8月の列を動的に求める
+  if (augustCol < 1) { Logger.log('MONTHSに8が見つかりません: ' + MONTHS.join(',')); return; }
+  var augustColLetter = columnToLetter_(augustCol + 1);
+  var augustValues = sheet.getRange(1, augustCol + 1, lastRow, 1).getValues();
+  var augustFormulas = sheet.getRange(1, augustCol + 1, lastRow, 1).getFormulas();
+
+  var log = ['月次サマリー 最終行=' + lastRow + '、8月列=' + augustColLetter + '列'];
+  for (var r = 0; r < lastRow; r++) {
+    log.push((r + 1) + '行目「' + labels[r][0] + '」: 値=' + augustValues[r][0] + ' 数式=' + (augustFormulas[r][0] || '(値のみ)'));
+  }
+  Logger.log(log.join('\n'));
+}
+
+/**
  * 【診断用・手動実行】現在の年度のスプレッドシートに実際にあるシートを一覧表示する(2026-08-15新設)。
  * ユーザーが直接シートを追加・変更した場合に、コード側(setupQualityDefectSystemFor_等)が把握している
  * 構成とのズレを確認するために使う。シート名・表示/非表示・行数・列数をログに出す。
