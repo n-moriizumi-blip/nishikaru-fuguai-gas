@@ -222,17 +222,21 @@ function getMasters_() {
  * 不良〇月シートへ1件書き込む。
  * 列構成(SetupSpreadsheet.gsの buildDefectMonthlySheet_ と対応させること):
  * A タイムスタンプ／B 処置区分／C 品証担当者／D 製造番号／E 得意先名／F 品番(図番)／G 加工者／
- * H 機種名／I 設備№／J 加工数／K 良品数(自動計算式、書き込まない)／L 不良数計／M 不良項目／
- * N キズ原因／O 不良数／P 不良項目詳細／Q 担当者2(不良項目ごとに原因を作った担当者が違う場合のみ
- * 入力する任意項目)／R 単価／S 金額(自動計算式、書き込まない)／T 備考／U 材質／
- * V 不良率(自動計算式、書き込まない)／W 送信ID
+ * H 機種名／I 設備№／J 加工数／K 良品数(自動計算式、書き込まない)／L 修正数(記録全体で1つ、
+ * 差し戻し時のみ入力)／M 不良数計／N 不良項目／O キズ原因／P 不良数／Q 不良項目詳細／
+ * R 担当者2(不良項目ごとに原因を作った担当者が違う場合のみ入力する任意項目)／S 単価／
+ * T 金額(自動計算式、書き込まない)／U 備考／V 材質／W 不良率(自動計算式、書き込まない)／X 送信ID
  * 【2026-08-13改訂】D列「製造番号」を新設(QRスキャンで取得済みだったがシートに保存していなかった)。
  * これによりD列以降が1列ずつ後ろにずれている。
  * 【2026-08-18改訂】キズ原因をV列からN列(不良項目の直後)へ移動し、常時表示に変更(以前は非表示・
  * 任意項目の位置づけだったが、入力アプリ側で条件表示・場合により必須の実項目になったため)。
  * これによりN列以降(旧「不良数」以降)が1列ずつ後ろにずれている。
+ * 【2026-08-19改訂】K列(良品数)の右にL列「修正数」を新設(差し戻し入力時、いくつ修正できたかを
+ * 記録全体で1つ記録する項目。良品数の自動計算式には使わない単純な記録項目)。これによりL列以降
+ * (旧「不良数計」以降)が1列ずつ後ろにずれている。あわせて、不良項目ごとの数量欄(旧O列、現P列)の
+ * アプリ側プレースホルダを「数量」から「不良数」に統一(処置区分によらず同じ表記にする)。
  *
- * K・S・V列はSetupSpreadsheet.gs側で数式を全行にあらかじめ設定してあるため、
+ * K・T・W列はSetupSpreadsheet.gs側で数式を全行にあらかじめ設定してあるため、
  * ここで値を書き込むと数式が消えてしまう。書き込み対象からは常に除外する。
  *
  * 不良項目が複数ある場合、1件目はメイン行のM・O〜Q列に、2件目以降はB列(処置区分。行の色分けを
@@ -268,7 +272,7 @@ function writeDefectRecord_(body, verifiedName) {
 /**
  * 指定した開始行から、1件分のレコード(不良項目が複数なら複数行)を書き込む共通処理
  * (2026-08-18、writeDefectRecord_とupdateDefectRecord_で共有するために切り出した)。
- * K・S・V列(良品数・金額・不良率)はSetupSpreadsheet.gs側の数式のため書き込み対象から常に除外する。
+ * K・T・W列(良品数・金額・不良率)はSetupSpreadsheet.gs側の数式のため書き込み対象から常に除外する。
  * @param {Date} timestamp A列(タイムスタンプ)に書く値。新規送信は現在時刻、更新は元の送信時刻を維持する。
  */
 function writeRecordRows_(sheet, startRow, body, verifiedName, submissionId, items, timestamp) {
@@ -286,35 +290,36 @@ function writeRecordRows_(sheet, startRow, body, verifiedName, submissionId, ite
     body.setsubi || '',           // I 設備№
     Number(body.suryo) || ''      // J 加工数
   ]]);
-  sheet.getRange(startRow, 12, 1, 2).setValues([[
-    totalQty,                     // L 不良数計
-    items[0].name                 // M 不良項目(1件目)
+  sheet.getRange(startRow, 12).setValue(Number(body.shuseisu) || ''); // L 修正数(記録全体で1つ、差し戻し時のみ意味を持つ)
+  sheet.getRange(startRow, 13, 1, 2).setValues([[
+    totalQty,                     // M 不良数計
+    items[0].name                 // N 不良項目(1件目)
   ]]);
-  sheet.getRange(startRow, 14).setValue(body.kizugenin || '');      // N キズ原因(レコード全体で1つ)
-  sheet.getRange(startRow, 15, 1, 3).setValues([[
-    Number(items[0].qty) || '',   // O 不良数(1件目)
-    items[0].detail || '',        // P 不良項目詳細(1件目)
-    items[0].worker2 || ''        // Q 担当者2(1件目、任意)
+  sheet.getRange(startRow, 15).setValue(body.kizugenin || '');      // O キズ原因(レコード全体で1つ)
+  sheet.getRange(startRow, 16, 1, 3).setValues([[
+    Number(items[0].qty) || '',   // P 不良数(1件目)
+    items[0].detail || '',        // Q 不良項目詳細(1件目)
+    items[0].worker2 || ''        // R 担当者2(1件目、任意)
   ]]);
-  sheet.getRange(startRow, 18).setValue(Number(body.tanka) || '');  // R 単価
-  sheet.getRange(startRow, 20).setValue(body.biko || '');           // T 備考
-  sheet.getRange(startRow, 21).setValue(body.zaishitsu || '');      // U 材質
-  sheet.getRange(startRow, 23).setValue(submissionId);              // W 送信ID
+  sheet.getRange(startRow, 19).setValue(Number(body.tanka) || '');  // S 単価
+  sheet.getRange(startRow, 21).setValue(body.biko || '');           // U 備考
+  sheet.getRange(startRow, 22).setValue(body.zaishitsu || '');      // V 材質
+  sheet.getRange(startRow, 24).setValue(submissionId);              // X 送信ID
 
   for (var i = 1; i < items.length; i++) {
     var r = startRow + i;
     sheet.getRange(r, 2).setValue(body.shochiKubun || ''); // B 処置区分(追加行にも複製、行の色分け用)
-    sheet.getRange(r, 13).setValue(items[i].name);         // M 不良項目(追加行)
-    sheet.getRange(r, 15, 1, 3).setValues([[
+    sheet.getRange(r, 14).setValue(items[i].name);         // N 不良項目(追加行)
+    sheet.getRange(r, 16, 1, 3).setValues([[
       Number(items[i].qty) || '', items[i].detail || '', items[i].worker2 || ''
-    ]]); // O・P・Q(不良数・詳細・担当者2、追加行)
-    sheet.getRange(r, 23).setValue(submissionId); // W 送信ID(追加行にも複製、編集時にまとめて見つけるため)
+    ]]); // P・Q・R(不良数・詳細・担当者2、追加行)
+    sheet.getRange(r, 24).setValue(submissionId); // X 送信ID(追加行にも複製、編集時にまとめて見つけるため)
   }
 
   // 1件の入力(不良項目が複数で複数行にまたがる場合はまとめて)を枠線で囲み、次の入力と見分けやすくする。
   // 旧システム(検査不具合報告\コード.js)のtransferToMonthlySheetが送信のたびに行っていたのと同じ考え方。
   // 外枠のみ(内部に縦線・横線は引かない)。
-  sheet.getRange(startRow, 1, items.length, 23)
+  sheet.getRange(startRow, 1, items.length, 24)
     .setBorder(true, true, true, true, false, false, COLOR.HEADER_BORDER, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 }
 
@@ -340,7 +345,7 @@ function lookupRecordForEdit_(mfgNo, verifiedName) {
     var sheet = ss.getSheetByName('不良' + month + '月');
     if (!sheet) return;
     var rows = DATA_END_ROW - DATA_START_ROW + 1;
-    var values = sheet.getRange(DATA_START_ROW, 1, rows, 23).getValues(); // A〜W列
+    var values = sheet.getRange(DATA_START_ROW, 1, rows, 24).getValues(); // A〜X列
     for (var i = 0; i < values.length; i++) {
       var v = values[i];
       var timestamp = v[0]; // A タイムスタンプ(メイン行のみ入っている)
@@ -355,7 +360,7 @@ function lookupRecordForEdit_(mfgNo, verifiedName) {
   if (!best) return { found: false };
 
   var sheet = ss.getSheetByName('不良' + best.month + '月');
-  var id = sheet.getRange(best.row, 23).getValue();
+  var id = sheet.getRange(best.row, 24).getValue();
   if (!id) return { found: false }; // この機能が入る前に送信された記録(送信IDが無い)は編集対象外
 
   var rows = findRecordRows_(sheet, id);
@@ -365,7 +370,7 @@ function lookupRecordForEdit_(mfgNo, verifiedName) {
 /** シートのW列(送信ID)から、指定IDに一致する行番号をすべて返す(昇順) */
 function findRecordRows_(sheet, id) {
   var rows = DATA_END_ROW - DATA_START_ROW + 1;
-  var idValues = sheet.getRange(DATA_START_ROW, 23, rows, 1).getValues();
+  var idValues = sheet.getRange(DATA_START_ROW, 24, rows, 1).getValues();
   var matched = [];
   for (var i = 0; i < idValues.length; i++) {
     if (idValues[i][0] === id) matched.push(DATA_START_ROW + i);
@@ -377,11 +382,11 @@ function findRecordRows_(sheet, id) {
 function readRecordFromRows_(sheet, rows) {
   if (rows.length === 0) return null;
   var mainRow = rows[0];
-  var main = sheet.getRange(mainRow, 1, 1, 23).getValues()[0];
+  var main = sheet.getRange(mainRow, 1, 1, 24).getValues()[0];
 
   var items = rows.map(function (row) {
-    var m = (row === mainRow) ? main : sheet.getRange(row, 1, 1, 23).getValues()[0];
-    return { name: m[12], qty: m[14], detail: m[15] || '', worker2: m[16] || '' }; // M・O・P・Q列
+    var m = (row === mainRow) ? main : sheet.getRange(row, 1, 1, 24).getValues()[0];
+    return { name: m[13], qty: m[15], detail: m[16] || '', worker2: m[17] || '' }; // N・P・Q・R列
   }).filter(function (it) { return it.name; });
 
   return {
@@ -393,10 +398,11 @@ function readRecordFromRows_(sheet, rows) {
     kishu: main[7],         // H
     setsubi: main[8],       // I
     suryo: main[9],         // J
-    kizugenin: main[13],    // N
-    tanka: main[17],        // R
-    biko: main[19],         // T
-    zaishitsu: main[20],    // U
+    shuseisu: main[11],     // L 修正数
+    kizugenin: main[14],    // O
+    tanka: main[18],        // S
+    biko: main[20],         // U
+    zaishitsu: main[21],    // V
     items: items
   };
 }
@@ -422,7 +428,7 @@ function updateDefectRecord_(body, verifiedName) {
   if (oldRows.length === 0) throw new Error('編集対象の記録が見つかりませんでした(既に削除された可能性があります)');
 
   var mainRow = oldRows[0];
-  var mainValues = sheet.getRange(mainRow, 1, 1, 23).getValues()[0];
+  var mainValues = sheet.getRange(mainRow, 1, 1, 24).getValues()[0];
   if (mainValues[2] !== verifiedName) throw new Error('自分が送信した記録のみ編集できます');
   var originalTimestamp = mainValues[0];
 
@@ -433,23 +439,23 @@ function updateDefectRecord_(body, verifiedName) {
   if (items.length > oldRows.length) {
     for (var r = mainRow + oldRows.length; r < mainRow + items.length; r++) {
       if (r > DATA_END_ROW) throw new Error(sheetName + ' が満杯です(不良項目の追加行)');
-      var check = sheet.getRange(r, 1, 1, 13).getValues()[0];
-      var hasData = check[0] !== '' || check[12] !== ''; // A列(タイムスタンプ) or M列(不良項目)
+      var check = sheet.getRange(r, 1, 1, 14).getValues()[0];
+      var hasData = check[0] !== '' || check[13] !== ''; // A列(タイムスタンプ) or N列(不良項目)
       if (hasData) throw new Error('不良項目を増やすための空き行が見つかりませんでした。項目数を減らすか、直接シートを編集してください。');
     }
   }
 
   // 元の行(枠線含む)を一旦すべてクリアしてから書き直す。
-  // K・S・V列(良品数・金額・不良率)はSetupSpreadsheet.gs側の数式が全行に入っているため、
+  // K・T・W列(良品数・金額・不良率)はSetupSpreadsheet.gs側の数式が全行に入っているため、
   // 巻き込んで消さないよう列を分けてクリアする(writeRecordRows_が書き込む列と同じ切り方)。
   var oldLastRow = mainRow + Math.max(oldRows.length, items.length) - 1;
   var clearRows = oldLastRow - mainRow + 1;
   sheet.getRange(mainRow, 1, clearRows, 10).clearContent();  // A-J
-  sheet.getRange(mainRow, 12, clearRows, 6).clearContent();  // L-Q
-  sheet.getRange(mainRow, 18, clearRows, 1).clearContent();  // R
-  sheet.getRange(mainRow, 20, clearRows, 2).clearContent();  // T-U
-  sheet.getRange(mainRow, 23, clearRows, 1).clearContent();  // W
-  sheet.getRange(mainRow, 1, clearRows, 23).setBorder(false, false, false, false, false, false);
+  sheet.getRange(mainRow, 12, clearRows, 7).clearContent();  // L-R
+  sheet.getRange(mainRow, 19, clearRows, 1).clearContent();  // S
+  sheet.getRange(mainRow, 21, clearRows, 2).clearContent();  // U-V
+  sheet.getRange(mainRow, 24, clearRows, 1).clearContent();  // X
+  sheet.getRange(mainRow, 1, clearRows, 24).setBorder(false, false, false, false, false, false);
 
   writeRecordRows_(sheet, mainRow, body, verifiedName, body.id, items, originalTimestamp);
 }
@@ -537,10 +543,10 @@ function buildDashboardData_() {
 
   MONTHS.forEach(function (month) {
     var sheet = ss.getSheetByName('不良' + month + '月');
-    var rows = sheet.getRange(2, 1, 114, 19).getValues(); // A〜S列(E得意先名/G加工者/J加工数/L不良数計/S金額)
+    var rows = sheet.getRange(2, 1, 114, 20).getValues(); // A〜T列(E得意先名/G加工者/J加工数/M不良数計/T金額)
     var volume = 0;
     rows.forEach(function (row) {
-      var customer = row[4], worker = row[6], suryo = row[9], amount = row[18];
+      var customer = row[4], worker = row[6], suryo = row[9], amount = row[19];
       if (suryo) volume += Number(suryo) || 0;
       if (worker) workerDefectCount[worker] = (workerDefectCount[worker] || 0) + 1;
       if (customer && amount) customerAmount[customer] = (customerAmount[customer] || 0) + (Number(amount) || 0);
@@ -587,11 +593,11 @@ function buildDashboardData_() {
   };
 }
 
-/** シートの次の空き行を探す(A列・L列のどちらかが埋まっていればその行は使用済みとみなす) */
+/** シートの次の空き行を探す(A列・N列のどちらかが埋まっていればその行は使用済みとみなす) */
 function findNextRow_(sheet) {
   var rowCount = DATA_END_ROW - DATA_START_ROW + 1;
   var colA = sheet.getRange(DATA_START_ROW, 1, rowCount, 1).getValues();
-  var colM = sheet.getRange(DATA_START_ROW, 13, rowCount, 1).getValues(); // M列(不良項目)
+  var colM = sheet.getRange(DATA_START_ROW, 14, rowCount, 1).getValues(); // N列(不良項目)
   var last = DATA_START_ROW - 1;
   for (var i = 0; i < colA.length; i++) {
     if (colA[i][0] !== '' || colM[i][0] !== '') last = DATA_START_ROW + i;
