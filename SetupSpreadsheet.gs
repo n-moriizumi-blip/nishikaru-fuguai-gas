@@ -1403,9 +1403,13 @@ function darkenColor_(hex, amount) {
  * 件数はB列だけでなくA列(タイムスタンプ、メイン行のみ記入)も条件に加えて、追加行を
  * 二重カウントしないようにしている。個数・金額はメイン行のM列(不良数計)・T列(金額)の合計
  * (追加行はM・T列とも空欄のため、SUMIFSの条件をB列だけにしても二重加算にはならない)。
- * 【2026-08-19改訂】差し戻しでも単価(S列)を入力するようになり、金額(T列)が差し戻し行にも
- * 計算されるようになったため、「差し戻し 不良金額」行(8行目)を新設(KPブロックと同じ3行構成に揃えた)。
- * これに伴い合計件数・合計個数の行番号が9・10行目から10・11行目へ1つずつ後ろにずれている。
+ * 【2026-08-19改訂その1】差し戻しでも単価(S列)を入力するようになり、金額(T列)が差し戻し行にも
+ * 計算されるようになったため、「差し戻し 不良金額」行を新設。
+ * 【2026-08-19改訂その2】差し戻しブロックに「差し戻し 修正数」行を追加(L列、記録全体で1つの
+ * 単純な記録項目、KPブロックには無い差し戻し固有の項目)し、KP・差し戻しどちらも「不良件数」
+ * 「不良個数」の表記に統一。あわせて合計ブロックに「合計 不良金額(KP＋差し戻し)」行を追加。
+ * 差し戻しブロックが4行(不良件数・修正数・不良個数・不良金額)になったため、
+ * 合計件数・合計個数・合計金額の行番号が10〜行目から11〜13行目へ1つずつ後ろにずれている。
  */
 function buildMonthlySummarySheet_(ss) {
   var sheet = replaceSheet_(ss, '月次サマリー');
@@ -1419,27 +1423,29 @@ function buildMonthlySummarySheet_(ss) {
   sheet.setFrozenColumns(1);
 
   var kpCountRow = 2, kpQtyRow = 3, kpAmountRow = 4;
-  var reworkCountRow = 6, reworkQtyRow = 7, reworkAmountRow = 8;
-  var totalCountRow = 10, totalQtyRow = 11;
+  var reworkCountRow = 6, reworkShuseisuRow = 7, reworkQtyRow = 8, reworkAmountRow = 9;
+  var totalCountRow = 11, totalQtyRow = 12, totalAmountRow = 13;
 
   var labels = {};
   labels[kpCountRow] = 'KP 不良件数';
   labels[kpQtyRow] = 'KP 不良個数';
   labels[kpAmountRow] = 'KP 不良金額';
-  labels[reworkCountRow] = '差し戻し 件数';
-  labels[reworkQtyRow] = '差し戻し 個数';
-  labels[reworkAmountRow] = '差し戻し 不良金額'; // 2026-08-19、差し戻しでも単価を入力するようになったため新設
+  labels[reworkCountRow] = '差し戻し 不良件数';
+  labels[reworkShuseisuRow] = '差し戻し 修正数'; // 2026-08-19新設、記録全体で1つの単純な記録項目(L列)の月別合計
+  labels[reworkQtyRow] = '差し戻し 不良個数';
+  labels[reworkAmountRow] = '差し戻し 不良金額';
   labels[totalCountRow] = '合計 不良件数(KP＋差し戻し)';
   labels[totalQtyRow] = '合計 不良個数(KP＋差し戻し)';
+  labels[totalAmountRow] = '合計 不良金額(KP＋差し戻し)'; // 2026-08-19新設
 
   var rowColor = {};
   var rowFont = {};
   [kpCountRow, kpQtyRow, kpAmountRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_KP_BG; rowFont[r] = COLOR.KP_FONT; });
-  [reworkCountRow, reworkQtyRow, reworkAmountRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_REWORK_BG; rowFont[r] = COLOR.REWORK_FONT; });
-  [totalCountRow, totalQtyRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_TOTAL_BG; rowFont[r] = COLOR.TOTAL_FONT; });
+  [reworkCountRow, reworkShuseisuRow, reworkQtyRow, reworkAmountRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_REWORK_BG; rowFont[r] = COLOR.REWORK_FONT; });
+  [totalCountRow, totalQtyRow, totalAmountRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_TOTAL_BG; rowFont[r] = COLOR.TOTAL_FONT; });
 
   // 先に表全体へ薄いグリッド罫線を引いておく(この後のブロック区切り線・ヘッダー下線で上書きする)
-  var lastRow = totalQtyRow;
+  var lastRow = totalAmountRow;
   sheet.getRange(1, 1, lastRow, totalCol)
     .setBorder(true, true, true, true, true, true, COLOR.GRID_BORDER, SpreadsheetApp.BorderStyle.SOLID);
 
@@ -1466,10 +1472,12 @@ function buildMonthlySummarySheet_(ss) {
     sheet.getRange(kpQtyRow, col).setFormula('=SUMIFS(' + sn + '!M2:M115,' + sn + '!B2:B115,"社内不良(KP)")'); // M列(不良数計、2026-08-19にL列から移動)
     sheet.getRange(kpAmountRow, col).setFormula('=SUMIFS(' + sn + '!T2:T115,' + sn + '!B2:B115,"社内不良(KP)")'); // T列(金額、2026-08-19にS列から移動)
     sheet.getRange(reworkCountRow, col).setFormula('=COUNTIFS(' + sn + '!A2:A115,"<>",' + sn + '!B2:B115,"差し戻し")');
+    sheet.getRange(reworkShuseisuRow, col).setFormula('=SUMIFS(' + sn + '!L2:L115,' + sn + '!B2:B115,"差し戻し")'); // L列(修正数)。2026-08-19新設
     sheet.getRange(reworkQtyRow, col).setFormula('=SUMIFS(' + sn + '!M2:M115,' + sn + '!B2:B115,"差し戻し")'); // M列(不良数計、2026-08-19にL列から移動)
     sheet.getRange(reworkAmountRow, col).setFormula('=SUMIFS(' + sn + '!T2:T115,' + sn + '!B2:B115,"差し戻し")'); // T列(金額)。2026-08-19、差し戻しでも単価を入力するようになったため新設
     sheet.getRange(totalCountRow, col).setFormula('=' + colLetter + kpCountRow + '+' + colLetter + reworkCountRow);
     sheet.getRange(totalQtyRow, col).setFormula('=' + colLetter + kpQtyRow + '+' + colLetter + reworkQtyRow);
+    sheet.getRange(totalAmountRow, col).setFormula('=' + colLetter + kpAmountRow + '+' + colLetter + reworkAmountRow); // 2026-08-19新設
   });
 
   Object.keys(labels).forEach(function (r) {

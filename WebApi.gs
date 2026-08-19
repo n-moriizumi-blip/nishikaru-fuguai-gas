@@ -542,12 +542,16 @@ function buildDashboardData_() {
   // 【2026-08-19改訂】差し戻しでも単価を入力するようになり「差し戻し 不良金額」行(8行目)が
   // 新設されたため、合計件数・合計個数の行が9・10行目から10・11行目へ1つずつ後ろにずれている。
   var summarySheet = ss.getSheetByName('月次サマリー');
-  var monthlyQty = summarySheet.getRange(11, 2, 1, MONTHS.length).getValues()[0].map(Number);   // 合計 不良個数(KP+差し戻し)
-  var monthlyCount = summarySheet.getRange(10, 2, 1, MONTHS.length).getValues()[0].map(Number);  // 合計 不良件数(KP+差し戻し)
+  var monthlyQty = summarySheet.getRange(12, 2, 1, MONTHS.length).getValues()[0].map(Number);   // 合計 不良個数(KP+差し戻し)
+  var monthlyCount = summarySheet.getRange(11, 2, 1, MONTHS.length).getValues()[0].map(Number);  // 合計 不良件数(KP+差し戻し)
   var monthlyAmountKP = summarySheet.getRange(4, 2, 1, MONTHS.length).getValues()[0].map(Number); // KP 不良金額
-  var monthlyAmountRework = summarySheet.getRange(8, 2, 1, MONTHS.length).getValues()[0].map(Number); // 差し戻し 不良金額
+  var monthlyAmountRework = summarySheet.getRange(9, 2, 1, MONTHS.length).getValues()[0].map(Number); // 差し戻し 不良金額
+  var monthlyQtyKP = summarySheet.getRange(3, 2, 1, MONTHS.length).getValues()[0].map(Number);   // KP 不良個数
+  var monthlyQtyRework = summarySheet.getRange(8, 2, 1, MONTHS.length).getValues()[0].map(Number); // 差し戻し 不良個数
+  var monthlyCountKP = summarySheet.getRange(2, 2, 1, MONTHS.length).getValues()[0].map(Number);   // KP 不良件数
+  var monthlyCountRework = summarySheet.getRange(6, 2, 1, MONTHS.length).getValues()[0].map(Number); // 差し戻し 不良件数
   var kpQtyYear = Number(summarySheet.getRange(3, 14).getValue()) || 0;     // KP 不良個数(年計)
-  var reworkQtyYear = Number(summarySheet.getRange(7, 14).getValue()) || 0; // 差し戻し 個数(年計)
+  var reworkQtyYear = Number(summarySheet.getRange(8, 14).getValue()) || 0; // 差し戻し 不良個数(年計)
 
   // --- 不良集計: 分類別×月別の個数(SUMIF相当をJS側で計算) ---
   var defectGroups = uniqueInOrder_(DEFECT_ITEMS.map(function (item) { return item.group; }));
@@ -608,15 +612,19 @@ function buildDashboardData_() {
   // --- 不良〇月シート12枚: 得意先別金額・加工者別件数・月別加工数合計(不良率の分母) ---
   var customerAmount = {}; // { 得意先名: 金額合計 }
   var workerDefectCount = {}; // { 加工者: 不良件数(行数、追加行は加工者が空欄のため二重カウントされない) }
-  var monthlyVolume = [];  // 月別 加工数合計
+  var monthlyVolume = [];  // 月別 加工数合計(不良率の分母。ただし下記の通り一部除外あり)
 
   MONTHS.forEach(function (month) {
     var sheet = ss.getSheetByName('不良' + month + '月');
-    var rows = sheet.getRange(2, 1, 114, 20).getValues(); // A〜T列(E得意先名/G加工者/J加工数/M不良数計/T金額)
+    var rows = sheet.getRange(2, 1, 114, 20).getValues(); // A〜T列(B処置区分/E得意先名/G加工者/J加工数/M不良数計/T金額)
     var volume = 0;
     rows.forEach(function (row) {
-      var customer = row[4], worker = row[6], suryo = row[9], amount = row[19];
-      if (suryo) volume += Number(suryo) || 0;
+      var shochiKubun = row[1], customer = row[4], worker = row[6], suryo = row[9], totalDefectQty = row[12], amount = row[19];
+      // 差し戻しで不良数計(M列)が0のレコードは不良率の分母(加工数)から除外する(2026-08-19、ユーザー要望)。
+      // 差し戻しは「差し戻された時点で不良が発生している」ため、そのレコードの不良率が0%になるのは
+      // 実態を正しく表しておらず、加工数だけを分母に加えると不良率(KP＋差し戻し合算)を不自然に薄めてしまうため。
+      var excludeFromRate = (shochiKubun === '差し戻し' && Number(totalDefectQty) === 0);
+      if (suryo && !excludeFromRate) volume += Number(suryo) || 0;
       if (worker) workerDefectCount[worker] = (workerDefectCount[worker] || 0) + 1;
       if (customer && amount) customerAmount[customer] = (customerAmount[customer] || 0) + (Number(amount) || 0);
     });
@@ -648,6 +656,10 @@ function buildDashboardData_() {
     monthlyCount: monthlyCount,
     monthlyAmountKP: monthlyAmountKP,
     monthlyAmountRework: monthlyAmountRework,
+    monthlyQtyKP: monthlyQtyKP,
+    monthlyQtyRework: monthlyQtyRework,
+    monthlyCountKP: monthlyCountKP,
+    monthlyCountRework: monthlyCountRework,
     defectGroups: defectGroups,
     stackedByGroup: stackedByGroup,
     causeGroups: causeGroups,
