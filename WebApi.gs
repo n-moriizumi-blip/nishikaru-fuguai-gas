@@ -23,7 +23,8 @@
  * 6. コードを変更するたびに「新しいバージョン」で再デプロイすること(勤怠管理システムと同じ運用)
  *
  * 提供するAPI:
- * - GET  ?mode=lookup&mfgNo=製造番号   → 進捗状況照会シートを検索し、得意先名・品番(図番)を返す(未ログインでも可)
+ * - GET  ?mode=lookup&mfgNo=製造番号   → 進捗状況照会シートを検索し、得意先名・品番(図番)・機種名・
+ *   設備№・加工者名・加工数・材質・単価を返す(未ログインでも可、2026-08-19に得意先名・品番のみから拡張)
  * - GET  ?mode=masters                 → 組織図マスタから機種名(機械名)・加工者名の一覧を返す(未ログインでも可)
  * - GET  ?mode=dashboard               → ダッシュボード(dashboard.html)用の集計データをJSONで返す(未ログインでも可)
  * - POST { action:'submit', idToken:'...', ... } → 不良〇月シートへ1件書き込む。idTokenをGoogleに
@@ -156,9 +157,17 @@ function verifyGoogleToken_(idToken) {
 }
 
 /**
- * 製造番号から「進捗状況照会」シートを検索し、得意先名・品番(図番)を返す。
- * 同じ製造番号は複数行(工程ごと)にまたがることがあるが、得意先名・品番はどの行でも同じなので
- * 最初に見つかった行を採用する。
+ * 製造番号から「進捗状況照会」シートを検索し、フォーム自動入力用の項目を返す(2026-08-19拡張)。
+ * 同じ製造番号は複数行(工程ごと)にまたがるため、項目によって採用する行を使い分ける:
+ * - 得意先名・品番(図番)・材質(品名・型格)・単価(納入単価): どの行でも同じ値のはずなので、
+ *   最初に見つかった行を採用する。
+ * - 機種名(設備名)・設備№(設備No.)・加工者名(担当者名): 工程順が1の行を採用する
+ *   (以降の工程で設備・担当者が変わることもあるため、あくまで入力の初期値。アプリ側では
+ *   引き続き変更可能な入力欄のまま)。
+ * - 加工数(完了数量): 値が入っている工程順の中で一番大きい(最後に記録された)行を採用する。
+ * 材質は「ハイフン/×より後ろ」「カッコとその中身」「余分なスペース」を取り除いて返す
+ * (`cleanMaterialName_`参照、品名・型格の生値は「SUS303-G」のように末尾に加工方法等の
+ * 付随情報が付いていることがあり、材質そのものだけを欲しいため)。
  */
 function lookupByMfgNo_(mfgNo) {
   mfgNo = (mfgNo || '').toString().trim();
@@ -170,24 +179,81 @@ function lookupByMfgNo_(mfgNo) {
 
   var data = sheet.getDataRange().getValues();
   var header = data[0];
-  var colMfgNo = header.indexOf('製造番号');
-  var colCustomer = header.indexOf('得意先名');
-  var colDrawing = header.indexOf('品番(図番)');
-  if (colMfgNo === -1 || colCustomer === -1 || colDrawing === -1) {
+  var col = {
+    mfgNo: header.indexOf('製造番号'),
+    customer: header.indexOf('得意先名'),
+    drawing: header.indexOf('品番(図番)'),
+    processOrder: header.indexOf('工程順'),
+    workerName: header.indexOf('担当者名'),
+    completedQty: header.indexOf('完了数量'),
+    equipmentName: header.indexOf('設備名'),
+    equipmentNo: header.indexOf('設備No.'),
+    material: header.indexOf('品名・型格'),
+    unitPrice: header.indexOf('納入単価')
+  };
+  if (col.mfgNo === -1 || col.customer === -1 || col.drawing === -1) {
     return { found: false, error: '想定した列(製造番号/得意先名/品番(図番))が見つかりません' };
   }
 
+  var result = null;
+  var firstProcessRow = null; // 工程順=1の行(機種名・設備№・加工者名の候補)
+  var lastQtyRow = null;      // 完了数量が入っている中で工程順が一番大きい行(加工数の候補)
+
   for (var i = 1; i < data.length; i++) {
-    if (data[i][colMfgNo].toString().trim() === mfgNo) {
-      return {
+    var row = data[i];
+    if (row[col.mfgNo].toString().trim() !== mfgNo) continue;
+
+    if (!result) {
+      result = {
         found: true,
         mfgNo: mfgNo,
-        customer: data[i][colCustomer].toString(),
-        drawing: data[i][colDrawing].toString()
+        customer: row[col.customer].toString(),
+        drawing: row[col.drawing].toString(),
+        zaishitsu: col.material !== -1 ? cleanMaterialName_(row[col.material]) : '',
+        tanka: col.unitPrice !== -1 ? row[col.unitPrice] : ''
       };
     }
+
+    var processOrder = col.processOrder !== -1 ? Number(row[col.processOrder]) : null;
+    if (processOrder === 1 && !firstProcessRow) firstProcessRow = row;
+
+    var completedQty = col.completedQty !== -1 ? row[col.completedQty] : '';
+    if (completedQty !== '' && completedQty !== null && processOrder !== null) {
+      if (!lastQtyRow || processOrder > Number(lastQtyRow[col.processOrder])) lastQtyRow = row;
+    }
   }
-  return { found: false, mfgNo: mfgNo };
+
+  if (!result) return { found: false, mfgNo: mfgNo };
+
+  if (firstProcessRow) {
+    result.kishu = col.equipmentName !== -1 ? firstProcessRow[col.equipmentName].toString() : '';
+    result.setsubi = col.equipmentNo !== -1 ? firstProcessRow[col.equipmentNo].toString() : '';
+    result.kakosha = col.workerName !== -1 ? firstProcessRow[col.workerName].toString() : '';
+  }
+  if (lastQtyRow) {
+    result.suryo = col.completedQty !== -1 ? lastQtyRow[col.completedQty] : '';
+  }
+
+  return result;
+}
+
+/**
+ * 「品名・型格」の生値から材質名だけを取り出す(2026-08-19新設)。
+ * 例: "SUS303-G" → "SUS303"、"SUS303(黒処理)" → "SUS303"、"SUS303 - G " → "SUS303"
+ * ハイフン(-)・×より後ろは不要、カッコ(全角・半角とも)とその中身も不要、
+ * 前後・内部の余分なスペースは削除して詰める、という指定。
+ */
+function cleanMaterialName_(raw) {
+  var s = (raw || '').toString();
+  s = s.replace(/（[^）]*）/g, '').replace(/\([^)]*\)/g, ''); // カッコと中身を除去(先に処理し、カッコ内のハイフンに惑わされないようにする)
+  var cutIndex = s.length;
+  var hyphenIdx = s.indexOf('-');
+  if (hyphenIdx !== -1) cutIndex = Math.min(cutIndex, hyphenIdx);
+  var xIdx = s.indexOf('×');
+  if (xIdx !== -1) cutIndex = Math.min(cutIndex, xIdx);
+  s = s.slice(0, cutIndex);
+  s = s.replace(/[\s　]/g, ''); // 前後・内部の余分なスペースを削除して詰める
+  return s;
 }
 
 /**
