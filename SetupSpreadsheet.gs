@@ -749,6 +749,26 @@ function addShuseisuColumn() {
 }
 
 /**
+ * 【1回だけ手動実行・2026-08-19】`addShuseisuColumn`(修正数列の追加)の後に実行する。
+ * 「不良集計」「不良集計(キズ原因)」「月次サマリー」「グラフ」の4シートは実データを持たず
+ * 数式・グラフだけで構成されているため、作り直しても既存データへの影響は無い
+ * (`updateDefectItemMaster`が同じ考え方で3シートを再構築しているのと同じ)。
+ * 列がずれたことによる数式の追従は`sheet.insertColumnBefore()`実行時にGoogle Sheets側で
+ * 自動的に行われるはずだが、念のためコード側の最新の列参照(修正数列の新設・差し戻し金額行の新設を
+ * 反映済み)で確実に作り直し、「差し戻し 不良金額」行を含む月次サマリー・グラフの新しい構成にする。
+ */
+function rebuildSummarySheetsAfterShuseisu20260819() {
+  var ss = getCurrentYearSpreadsheet_();
+  buildDefectSummarySheet_(ss);
+  buildKpCauseSummarySheet_(ss);
+  buildMonthlySummarySheet_(ss);
+  buildDefectDashboardSheet_(ss);
+  SpreadsheetApp.flush();
+  Logger.log('「不良集計」「不良集計(キズ原因)」「月次サマリー」「グラフ」を作り直しました'
+    + '(修正数列の追加・差し戻し金額行の新設を反映、データへの影響なし)。');
+}
+
+/**
  * 【診断用・手動実行】現在の年度のスプレッドシートに実際にあるシートを一覧表示する(2026-08-15新設)。
  * ユーザーが直接シートを追加・変更した場合に、コード側(setupQualityDefectSystemFor_等)が把握している
  * 構成とのズレを確認するために使う。シート名・表示/非表示・行数・列数をログに出す。
@@ -1351,7 +1371,10 @@ function darkenColor_(hex, amount) {
  * 【2026-08-11改訂】B列(処置区分)は複数不良項目の追加行にも同じ値が入るようになったため、
  * 件数はB列だけでなくA列(タイムスタンプ、メイン行のみ記入)も条件に加えて、追加行を
  * 二重カウントしないようにしている。個数・金額はメイン行のM列(不良数計)・T列(金額)の合計
- * (追加行はL・R列とも空欄のため、SUMIFSの条件をB列だけにしても二重加算にはならない)。
+ * (追加行はM・T列とも空欄のため、SUMIFSの条件をB列だけにしても二重加算にはならない)。
+ * 【2026-08-19改訂】差し戻しでも単価(S列)を入力するようになり、金額(T列)が差し戻し行にも
+ * 計算されるようになったため、「差し戻し 不良金額」行(8行目)を新設(KPブロックと同じ3行構成に揃えた)。
+ * これに伴い合計件数・合計個数の行番号が9・10行目から10・11行目へ1つずつ後ろにずれている。
  */
 function buildMonthlySummarySheet_(ss) {
   var sheet = replaceSheet_(ss, '月次サマリー');
@@ -1365,8 +1388,8 @@ function buildMonthlySummarySheet_(ss) {
   sheet.setFrozenColumns(1);
 
   var kpCountRow = 2, kpQtyRow = 3, kpAmountRow = 4;
-  var reworkCountRow = 6, reworkQtyRow = 7;
-  var totalCountRow = 9, totalQtyRow = 10;
+  var reworkCountRow = 6, reworkQtyRow = 7, reworkAmountRow = 8;
+  var totalCountRow = 10, totalQtyRow = 11;
 
   var labels = {};
   labels[kpCountRow] = 'KP 不良件数';
@@ -1374,13 +1397,14 @@ function buildMonthlySummarySheet_(ss) {
   labels[kpAmountRow] = 'KP 不良金額';
   labels[reworkCountRow] = '差し戻し 件数';
   labels[reworkQtyRow] = '差し戻し 個数';
+  labels[reworkAmountRow] = '差し戻し 不良金額'; // 2026-08-19、差し戻しでも単価を入力するようになったため新設
   labels[totalCountRow] = '合計 不良件数(KP＋差し戻し)';
   labels[totalQtyRow] = '合計 不良個数(KP＋差し戻し)';
 
   var rowColor = {};
   var rowFont = {};
   [kpCountRow, kpQtyRow, kpAmountRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_KP_BG; rowFont[r] = COLOR.KP_FONT; });
-  [reworkCountRow, reworkQtyRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_REWORK_BG; rowFont[r] = COLOR.REWORK_FONT; });
+  [reworkCountRow, reworkQtyRow, reworkAmountRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_REWORK_BG; rowFont[r] = COLOR.REWORK_FONT; });
   [totalCountRow, totalQtyRow].forEach(function (r) { rowColor[r] = COLOR.SUMMARY_TOTAL_BG; rowFont[r] = COLOR.TOTAL_FONT; });
 
   // 先に表全体へ薄いグリッド罫線を引いておく(この後のブロック区切り線・ヘッダー下線で上書きする)
@@ -1412,6 +1436,7 @@ function buildMonthlySummarySheet_(ss) {
     sheet.getRange(kpAmountRow, col).setFormula('=SUMIFS(' + sn + '!T2:T115,' + sn + '!B2:B115,"社内不良(KP)")'); // T列(金額、2026-08-19にS列から移動)
     sheet.getRange(reworkCountRow, col).setFormula('=COUNTIFS(' + sn + '!A2:A115,"<>",' + sn + '!B2:B115,"差し戻し")');
     sheet.getRange(reworkQtyRow, col).setFormula('=SUMIFS(' + sn + '!M2:M115,' + sn + '!B2:B115,"差し戻し")'); // M列(不良数計、2026-08-19にL列から移動)
+    sheet.getRange(reworkAmountRow, col).setFormula('=SUMIFS(' + sn + '!T2:T115,' + sn + '!B2:B115,"差し戻し")'); // T列(金額)。2026-08-19、差し戻しでも単価を入力するようになったため新設
     sheet.getRange(totalCountRow, col).setFormula('=' + colLetter + kpCountRow + '+' + colLetter + reworkCountRow);
     sheet.getRange(totalQtyRow, col).setFormula('=' + colLetter + kpQtyRow + '+' + colLetter + reworkQtyRow);
   });
@@ -1439,7 +1464,8 @@ function buildMonthlySummarySheet_(ss) {
  * (不良集計・不良集計(キズ原因)・月次サマリー)から作り直したもの。新システムには「出荷検査」
  * という区分が無い(社内不良(KP)/差し戻しのみ)ため、その区別は再現していない。
  * 2026-08-12、ユーザー合意の上で以下4種類に整理:
- *   ①月別不良個数(棒グラフ) ②月別不良金額(折れ線、単価を追う社内不良(KP)のみ)
+ *   ①月別不良個数(棒グラフ) ②月別不良金額(棒グラフ、社内不良KP・差し戻しの2系列。
+ *   2026-08-19改訂、以前は単価を追う社内不良(KP)のみだったが差し戻しでも単価を入力するようになったため)
  *   ③分類別内訳(積み上げ棒、月別×5グループ) ④キズ原因内訳(棒グラフ、原因グループ別の年計個数、任意項目)
  * A1〜O.. に各グラフの元データ(数式による自動集計、編集不要)を置き、その下にグラフ本体を配置する。
  * シートはタブの先頭(1番目)に配置する。
@@ -1463,13 +1489,15 @@ function buildDefectDashboardSheet_(ss) {
     sheet.getRange(row, 2).setFormula('=' + monthlySummarySheetName + '!' + colLetter + '10');
   });
 
-  // --- 表2: 月別不良金額(D3:E15、月次サマリーの「KP 不良金額」行を参照。差し戻しは単価を追わないため対象外) ---
-  sheet.getRange(3, 4, 1, 2).setValues([['月', '不良金額(社内不良KP)']]).setFontWeight('bold');
+  // --- 表2: 月別不良金額(D3:F15、月次サマリーの「KP 不良金額」「差し戻し 不良金額」行を参照)。
+  // 【2026-08-19改訂】差し戻しでも単価を入力するようになったため、KP・差し戻し両方の金額を表示する ---
+  sheet.getRange(3, 4, 1, 3).setValues([['月', '不良金額(社内不良KP)', '不良金額(差し戻し)']]).setFontWeight('bold');
   MONTHS.forEach(function (month, mi) {
     var row = 4 + mi;
     var colLetter = columnToLetter_(2 + mi);
     sheet.getRange(row, 4).setFormula('=' + monthlySummarySheetName + '!' + colLetter + '1');
     sheet.getRange(row, 5).setFormula('=' + monthlySummarySheetName + '!' + colLetter + '4');
+    sheet.getRange(row, 6).setFormula('=' + monthlySummarySheetName + '!' + colLetter + '8');
   });
 
   // --- 表3: 分類別内訳(月別×5グループ、G3:L15、不良集計シートの項目別個数をSUMIFで分類ごとに合算) ---
@@ -1516,13 +1544,12 @@ function buildDefectDashboardSheet_(ss) {
   sheet.insertChart(chart1);
 
   var chart2 = sheet.newChart()
-    .setChartType(Charts.ChartType.LINE)
-    .addRange(sheet.getRange(3, 4, 1 + MONTHS.length, 2))
+    .setChartType(Charts.ChartType.COLUMN)
+    .addRange(sheet.getRange(3, 4, 1 + MONTHS.length, 3))
     .setPosition(20, 9, 0, 0)
-    .setOption('title', '月別不良金額(社内不良(KP)のみ)')
+    .setOption('title', '月別不良金額(社内不良KP・差し戻し)')
     .setOption('width', 480).setOption('height', 300)
-    .setOption('legend', { position: 'none' })
-    .setOption('colors', [COLOR.REWORK_FONT])
+    .setOption('colors', [COLOR.KP_FONT, COLOR.REWORK_FONT])
     .build();
   sheet.insertChart(chart2);
 

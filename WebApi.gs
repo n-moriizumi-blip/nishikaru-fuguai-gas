@@ -472,11 +472,14 @@ function updateDefectRecord_(body, verifiedName) {
 function buildDashboardData_() {
   var ss = getCurrentYearSpreadsheet_(); // 年度自動ロールオーバー対応(SetupSpreadsheet.gs参照、同一GASプロジェクト内で共有)
 
-  // --- 月次サマリー: 月別 個数・件数・金額(KP)、KP/差し戻しの年計個数 ---
+  // --- 月次サマリー: 月別 個数・件数・金額(KP・差し戻し)、KP/差し戻しの年計個数 ---
+  // 【2026-08-19改訂】差し戻しでも単価を入力するようになり「差し戻し 不良金額」行(8行目)が
+  // 新設されたため、合計件数・合計個数の行が9・10行目から10・11行目へ1つずつ後ろにずれている。
   var summarySheet = ss.getSheetByName('月次サマリー');
-  var monthlyQty = summarySheet.getRange(10, 2, 1, MONTHS.length).getValues()[0].map(Number);   // 合計 不良個数(KP+差し戻し)
-  var monthlyCount = summarySheet.getRange(9, 2, 1, MONTHS.length).getValues()[0].map(Number);  // 合計 不良件数(KP+差し戻し)
+  var monthlyQty = summarySheet.getRange(11, 2, 1, MONTHS.length).getValues()[0].map(Number);   // 合計 不良個数(KP+差し戻し)
+  var monthlyCount = summarySheet.getRange(10, 2, 1, MONTHS.length).getValues()[0].map(Number);  // 合計 不良件数(KP+差し戻し)
   var monthlyAmountKP = summarySheet.getRange(4, 2, 1, MONTHS.length).getValues()[0].map(Number); // KP 不良金額
+  var monthlyAmountRework = summarySheet.getRange(8, 2, 1, MONTHS.length).getValues()[0].map(Number); // 差し戻し 不良金額
   var kpQtyYear = Number(summarySheet.getRange(3, 14).getValue()) || 0;     // KP 不良個数(年計)
   var reworkQtyYear = Number(summarySheet.getRange(7, 14).getValue()) || 0; // 差し戻し 個数(年計)
 
@@ -578,6 +581,7 @@ function buildDashboardData_() {
     monthlyQty: monthlyQty,
     monthlyCount: monthlyCount,
     monthlyAmountKP: monthlyAmountKP,
+    monthlyAmountRework: monthlyAmountRework,
     defectGroups: defectGroups,
     stackedByGroup: stackedByGroup,
     causeGroups: causeGroups,
