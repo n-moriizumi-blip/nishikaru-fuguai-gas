@@ -363,7 +363,7 @@ function writeRecordRows_(sheet, startRow, body, verifiedName, submissionId, ite
   ]]);
   sheet.getRange(startRow, 15).setValue(body.kizugenin || '');      // O キズ原因(レコード全体で1つ)
   sheet.getRange(startRow, 16, 1, 3).setValues([[
-    Number(items[0].qty) || '',   // P 不良数(1件目)
+    Number(items[0].qty) || 0,    // P 不良数(1件目)。0も有効な値のため空欄にはしない(2026-08-19)
     items[0].detail || '',        // Q 不良項目詳細(1件目)
     items[0].worker2 || ''        // R 担当者2(1件目、任意)
   ]]);
@@ -377,8 +377,8 @@ function writeRecordRows_(sheet, startRow, body, verifiedName, submissionId, ite
     sheet.getRange(r, 2).setValue(body.shochiKubun || ''); // B 処置区分(追加行にも複製、行の色分け用)
     sheet.getRange(r, 14).setValue(items[i].name);         // N 不良項目(追加行)
     sheet.getRange(r, 16, 1, 3).setValues([[
-      Number(items[i].qty) || '', items[i].detail || '', items[i].worker2 || ''
-    ]]); // P・Q・R(不良数・詳細・担当者2、追加行)
+      Number(items[i].qty) || 0, items[i].detail || '', items[i].worker2 || ''
+    ]]); // P・Q・R(不良数・詳細・担当者2、追加行)。不良数は0も有効な値のため空欄にはしない
     sheet.getRange(r, 24).setValue(submissionId); // X 送信ID(追加行にも複製、編集時にまとめて見つけるため)
   }
 
