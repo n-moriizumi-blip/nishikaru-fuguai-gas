@@ -553,18 +553,27 @@ function buildDashboardData_() {
   var kpQtyYear = Number(summarySheet.getRange(3, 14).getValue()) || 0;     // KP 不良個数(年計)
   var reworkQtyYear = Number(summarySheet.getRange(8, 14).getValue()) || 0; // 差し戻し 不良個数(年計)
 
-  // --- 不良集計: 分類別×月別の個数(SUMIF相当をJS側で計算) ---
+  // --- 不良集計: 分類別×月別の個数(SUMIF相当をJS側で計算)。あわせてキズ系だけは項目別×月別の
+  // 内訳も計算する(ダッシュボードの「月別キズ不良個数」グラフをキズ項目ごとに積み上げるため、2026-08-19)。
   var defectGroups = uniqueInOrder_(DEFECT_ITEMS.map(function (item) { return item.group; }));
   var itemSheet = ss.getSheetByName('不良集計');
+  var itemNames = itemSheet.getRange(3, 1, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return r[0]; });
   var itemGroups = itemSheet.getRange(3, 2, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return r[0]; });
-  var stackedByGroup = MONTHS.map(function (month, mi) {
+  var kizuItemNames = DEFECT_ITEMS.filter(function (item) { return item.group === 'キズ系'; }).map(function (item) { return item.name; });
+  var stackedByGroup = [];
+  var stackedByKizuItem = [];
+  MONTHS.forEach(function (month, mi) {
     var qtyCol = 4 + mi * 2; // 不良集計シートの月別「個数」列(D,F,H...)
     var qtyValues = itemSheet.getRange(3, qtyCol, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return Number(r[0]) || 0; });
-    return defectGroups.map(function (g) {
+    stackedByGroup.push(defectGroups.map(function (g) {
       var sum = 0;
       for (var i = 0; i < itemGroups.length; i++) if (itemGroups[i] === g) sum += qtyValues[i];
       return sum;
-    });
+    }));
+    stackedByKizuItem.push(kizuItemNames.map(function (name) {
+      var idx = itemNames.indexOf(name);
+      return idx >= 0 ? qtyValues[idx] : 0;
+    }));
   });
 
   // --- 不良集計(キズ原因): 原因グループ別の年計個数 ---
@@ -662,6 +671,8 @@ function buildDashboardData_() {
     monthlyCountRework: monthlyCountRework,
     defectGroups: defectGroups,
     stackedByGroup: stackedByGroup,
+    kizuItems: kizuItemNames,
+    stackedByKizuItem: stackedByKizuItem,
     causeGroups: causeGroups,
     causeTotals: causeTotals,
     customers: topN(customerAmount, 8),
