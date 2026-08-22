@@ -553,8 +553,9 @@ function buildDashboardData_() {
   var kpQtyYear = Number(summarySheet.getRange(3, 14).getValue()) || 0;     // KP 不良個数(年計)
   var reworkQtyYear = Number(summarySheet.getRange(8, 14).getValue()) || 0; // 差し戻し 不良個数(年計)
 
-  // --- 不良集計: 分類別×月別の個数(SUMIF相当をJS側で計算)。あわせてキズ系だけは項目別×月別の
-  // 内訳も計算する(ダッシュボードの「月別キズ不良個数」グラフをキズ項目ごとに積み上げるため、2026-08-19)。
+  // --- 不良集計: 分類別×月別の件数(SUMIF相当をJS側で計算。2026-08-19、個数から件数に変更)。
+  // あわせてキズ系だけは項目別×月別の個数の内訳も計算する
+  // (ダッシュボードの「月別キズ不良個数」グラフをキズ項目ごとに積み上げるため、2026-08-19)。
   var defectGroups = uniqueInOrder_(DEFECT_ITEMS.map(function (item) { return item.group; }));
   var itemSheet = ss.getSheetByName('不良集計');
   var itemNames = itemSheet.getRange(3, 1, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return r[0]; });
@@ -563,11 +564,13 @@ function buildDashboardData_() {
   var stackedByGroup = [];
   var stackedByKizuItem = [];
   MONTHS.forEach(function (month, mi) {
-    var qtyCol = 4 + mi * 2; // 不良集計シートの月別「個数」列(D,F,H...)
+    var countCol = 3 + mi * 2; // 不良集計シートの月別「件数」列(C,E,G...)
+    var qtyCol = countCol + 1; // 同じ月の「個数」列(D,F,H...)
+    var countValues = itemSheet.getRange(3, countCol, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return Number(r[0]) || 0; });
     var qtyValues = itemSheet.getRange(3, qtyCol, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return Number(r[0]) || 0; });
     stackedByGroup.push(defectGroups.map(function (g) {
       var sum = 0;
-      for (var i = 0; i < itemGroups.length; i++) if (itemGroups[i] === g) sum += qtyValues[i];
+      for (var i = 0; i < itemGroups.length; i++) if (itemGroups[i] === g) sum += countValues[i];
       return sum;
     }));
     stackedByKizuItem.push(kizuItemNames.map(function (name) {
