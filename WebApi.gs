@@ -238,6 +238,35 @@ function lookupByMfgNo_(mfgNo) {
 }
 
 /**
+ * 【診断用・手動実行・2026-08-22】特定の製造番号について、「進捗状況照会」シートの
+ * 該当する全行をそのままログ出力する(書き込みなし)。QR読み取り時に加工者・設備№だけが
+ * 空欄になる、という報告の原因調査用(工程順1の行に担当者名・設備名がまだ記入されていない
+ * だけなのか、それとも別の原因か切り分けるため)。調べたい製造番号は下のmfgNoを書き換えて使う。
+ */
+function debugInspectMfgNoInProgress() {
+  var mfgNo = 'H260800002';
+  var ss = SpreadsheetApp.openById(PROGRESS_SS_ID);
+  var sheet = ss.getSheetByName(PROGRESS_SHEET_NAME);
+  if (!sheet) { Logger.log('「' + PROGRESS_SHEET_NAME + '」シートが見つかりません'); return; }
+
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+  var colMfgNo = header.indexOf('製造番号');
+  if (colMfgNo === -1) { Logger.log('製造番号列が見つかりません: ' + header.join(' | ')); return; }
+
+  var log = ['見出し: ' + header.join(' | '), ''];
+  var matched = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][colMfgNo].toString().trim() === mfgNo) {
+      matched++;
+      log.push('行' + (i + 1) + ': ' + data[i].map(function (v) { return v === '' ? '(空欄)' : v; }).join(' | '));
+    }
+  }
+  log.push('', '製造番号「' + mfgNo + '」の一致行数: ' + matched);
+  Logger.log(log.join('\n'));
+}
+
+/**
  * 「品名・型格」の生値から材質名だけを取り出す(2026-08-19新設)。
  * 例: "SUS303-G" → "SUS303"、"SUS303(黒処理)" → "SUS303"、"SUS303 - G " → "SUS303"
  * ハイフン(-)・×より後ろは不要、カッコ(全角・半角とも)とその中身も不要、
