@@ -582,31 +582,42 @@ function buildDashboardData_() {
   // --- 月次サマリー: 月別 個数・件数・金額(KP・差し戻し)、KP/差し戻しの年計個数 ---
   // 【2026-08-19改訂】差し戻しでも単価を入力するようになり「差し戻し 不良金額」行(8行目)が
   // 新設されたため、合計件数・合計個数の行が9・10行目から10・11行目へ1つずつ後ろにずれている。
+  // 【2026-09-10改訂】以前は8回の個別getRange呼び出しに分けていたが、シートAPIは1回ごとに
+  // オーバーヘッドがあり、ダッシュボードの読み込みが遅い・まれにタイムアウトで失敗する原因に
+  // なっていた(doGetはbuildDashboardData_の例外を捕捉しておらずタイムアウト時はHTMLエラー
+  // ページが返るため、クライアント側でJSON解析エラーになる)。必要な範囲をまとめて1回で読み取る。
   var summarySheet = ss.getSheetByName('月次サマリー');
-  var monthlyQty = summarySheet.getRange(12, 2, 1, MONTHS.length).getValues()[0].map(Number);   // 合計 不良個数(KP+差し戻し)
-  var monthlyCount = summarySheet.getRange(11, 2, 1, MONTHS.length).getValues()[0].map(Number);  // 合計 不良件数(KP+差し戻し)
-  var monthlyAmountKP = summarySheet.getRange(4, 2, 1, MONTHS.length).getValues()[0].map(Number); // KP 不良金額
-  var monthlyAmountRework = summarySheet.getRange(9, 2, 1, MONTHS.length).getValues()[0].map(Number); // 差し戻し 不良金額
-  var monthlyQtyKP = summarySheet.getRange(3, 2, 1, MONTHS.length).getValues()[0].map(Number);   // KP 不良個数
-  var monthlyQtyRework = summarySheet.getRange(8, 2, 1, MONTHS.length).getValues()[0].map(Number); // 差し戻し 不良個数
-  var monthlyCountKP = summarySheet.getRange(2, 2, 1, MONTHS.length).getValues()[0].map(Number);   // KP 不良件数
-  var monthlyCountRework = summarySheet.getRange(6, 2, 1, MONTHS.length).getValues()[0].map(Number); // 差し戻し 不良件数
-  var kpQtyYear = Number(summarySheet.getRange(3, 14).getValue()) || 0;     // KP 不良個数(年計)
-  var reworkQtyYear = Number(summarySheet.getRange(8, 14).getValue()) || 0; // 差し戻し 不良個数(年計)
+  var summaryTotalCol = 2 + MONTHS.length; // 年計列(N列=14)
+  var summaryData = summarySheet.getRange(2, 2, 12, summaryTotalCol - 1).getValues(); // B2から年計列まで、1〜12行目
+  function summaryMonthRow_(row) { return summaryData[row - 2].slice(0, MONTHS.length).map(Number); }
+  function summaryYearCell_(row) { return Number(summaryData[row - 2][summaryTotalCol - 2]) || 0; }
+  var monthlyCountKP = summaryMonthRow_(2);   // KP 不良件数
+  var monthlyQtyKP = summaryMonthRow_(3);     // KP 不良個数
+  var monthlyAmountKP = summaryMonthRow_(4);  // KP 不良金額
+  var monthlyCountRework = summaryMonthRow_(6); // 差し戻し 不良件数
+  var monthlyQtyRework = summaryMonthRow_(8);   // 差し戻し 不良個数
+  var monthlyAmountRework = summaryMonthRow_(9); // 差し戻し 不良金額
+  var monthlyCount = summaryMonthRow_(11); // 合計 不良件数(KP+差し戻し)
+  var monthlyQty = summaryMonthRow_(12);   // 合計 不良個数(KP+差し戻し)
+  var kpQtyYear = summaryYearCell_(3);     // KP 不良個数(年計)
+  var reworkQtyYear = summaryYearCell_(8); // 差し戻し 不良個数(年計)
 
   // --- 不良集計: キズ系項目ごとの月別件数・個数(SUMIF/COUNTIF相当をJS側で計算)。
   // ダッシュボードの「月別キズ不良件数」「月別キズ不良個数」グラフをキズ項目ごとに積み上げるため
   // (2026-08-19。以前あった分類別(5グループ)の内訳は、キズ系の内訳グラフと役割が重複するため削除した)。
+  // 【2026-09-10改訂】12ヶ月×2列を毎月個別に読んでいた(24回)のを、全項目×全月の範囲を1回で読むよう変更。
   var itemSheet = ss.getSheetByName('不良集計');
-  var itemNames = itemSheet.getRange(3, 1, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return r[0]; });
+  var itemLastCol = 3 + MONTHS.length * 2 - 1; // 最後の月(個数列)まで
+  var itemData = itemSheet.getRange(3, 1, DEFECT_ITEMS.length, itemLastCol).getValues();
+  var itemNames = itemData.map(function (r) { return r[0]; }); // A列(不良項目名)
   var kizuItemNames = DEFECT_ITEMS.filter(function (item) { return item.group === 'キズ系'; }).map(function (item) { return item.name; });
   var stackedByKizuItem = [];
   var stackedByKizuItemCount = [];
   MONTHS.forEach(function (month, mi) {
-    var countCol = 3 + mi * 2; // 不良集計シートの月別「件数」列(C,E,G...)
-    var qtyCol = countCol + 1; // 同じ月の「個数」列(D,F,H...)
-    var countValues = itemSheet.getRange(3, countCol, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return Number(r[0]) || 0; });
-    var qtyValues = itemSheet.getRange(3, qtyCol, DEFECT_ITEMS.length, 1).getValues().map(function (r) { return Number(r[0]) || 0; });
+    var countIdx = 3 + mi * 2 - 1; // itemData内でのインデックス(0始まり、列C,E,G...に対応)
+    var qtyIdx = countIdx + 1;     // 同じ月の「個数」列(D,F,H...)
+    var countValues = itemData.map(function (r) { return Number(r[countIdx]) || 0; });
+    var qtyValues = itemData.map(function (r) { return Number(r[qtyIdx]) || 0; });
     stackedByKizuItem.push(kizuItemNames.map(function (name) {
       var idx = itemNames.indexOf(name);
       return idx >= 0 ? qtyValues[idx] : 0;
@@ -617,12 +628,13 @@ function buildDashboardData_() {
     }));
   });
 
-  // --- 不良集計(キズ原因): 原因グループ別の年計個数 ---
+  // --- 不良集計(キズ原因): 原因グループ別の年計個数(2026-09-10、2回の個別読み取りを1回にまとめた) ---
   var causeGroups = uniqueInOrder_(KP_CAUSE_ITEMS.map(function (item) { return item.group; }));
   var causeSheet = ss.getSheetByName('不良集計(キズ原因)');
-  var causeSheetGroups = causeSheet.getRange(3, 2, KP_CAUSE_ITEMS.length, 1).getValues().map(function (r) { return r[0]; });
   var causeYearQtyCol = 4 + MONTHS.length * 2 + 1; // 「年計」個数列
-  var causeQtyValues = causeSheet.getRange(3, causeYearQtyCol, KP_CAUSE_ITEMS.length, 1).getValues().map(function (r) { return Number(r[0]) || 0; });
+  var causeData = causeSheet.getRange(3, 2, KP_CAUSE_ITEMS.length, causeYearQtyCol - 1).getValues(); // B列〜年計個数列
+  var causeSheetGroups = causeData.map(function (r) { return r[0]; }); // B列(分類)
+  var causeQtyValues = causeData.map(function (r) { return Number(r[causeYearQtyCol - 2]) || 0; }); // 年計個数列
   var causeTotals = causeGroups.map(function (g) {
     var sum = 0;
     for (var i = 0; i < causeSheetGroups.length; i++) if (causeSheetGroups[i] === g) sum += causeQtyValues[i];
@@ -662,6 +674,7 @@ function buildDashboardData_() {
   // --- 不良〇月シート12枚: 得意先別金額・加工者別件数・月別加工数合計(不良率の分母) ---
   var customerAmount = {}; // { 得意先名: 金額合計 }
   var workerDefectCount = {}; // { 加工者: 不良件数(行数、追加行は加工者が空欄のため二重カウントされない) }
+  var workerReworkCount = {}; // { 加工者: 差し戻し件数のみ }(2026-09-10新設、加工者別差し戻し件数グラフ用)
   var monthlyVolume = [];  // 月別 加工数合計(不良率の分母。ただし下記の通り一部除外あり)
 
   MONTHS.forEach(function (month) {
@@ -676,6 +689,7 @@ function buildDashboardData_() {
       var excludeFromRate = (shochiKubun === '差し戻し' && Number(totalDefectQty) === 0);
       if (suryo && !excludeFromRate) volume += Number(suryo) || 0;
       if (worker) workerDefectCount[worker] = (workerDefectCount[worker] || 0) + 1;
+      if (worker && shochiKubun === '差し戻し') workerReworkCount[worker] = (workerReworkCount[worker] || 0) + 1;
       if (customer && amount) customerAmount[customer] = (customerAmount[customer] || 0) + (Number(amount) || 0);
     });
     monthlyVolume.push(volume);
@@ -717,6 +731,7 @@ function buildDashboardData_() {
     causeTotals: causeTotals,
     customers: topN(customerAmount, 8),
     workers: topN(workerDefectCount, 8),
+    workersRework: topN(workerReworkCount, 8),
     defectRate: defectRate,
     kpReworkRatio: kpReworkRatio,
     claimMonthly: claimMonthly,
