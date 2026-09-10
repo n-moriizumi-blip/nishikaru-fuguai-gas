@@ -195,8 +195,9 @@ aliases:
 - **`.clasp.json`**: `scriptExtensions: [".js", ".gs"]`により既存の`.gs`ファイルをそのままclasp管理対象にできる([[project_kintai-nishikaru-handover]]の`勤怠管理システム`フォルダと同じ設定)。`.claspignore`は`**/**`→`!*.gs`・`!appsscript.json`のホワイトリスト方式で、`.html`・`CLAUDE.md`等はGASプロジェクトへ誤ってpushされないようにしている。
 - **導入時の検証**: `clasp clone`で本番コードを取得し、ローカルの`.gs`ファイルと`diff`した結果、`SetupSpreadsheet.gs`・`WebApi.gs`は完全一致(=これまでの手動貼り替え運用は正しく反映されていた)。`MigrateOldData.gs`だけコメント1行分のズレがあり(2026-08-13にローカル側だけ更新してGASへの反映を忘れていた)、`clasp push`で解消した。
 - **【重要な注意点】`clasp pull`は既存の`.gs`ファイルと同名でも`.js`拡張子で新規ファイルを作ってしまう**(実際に発生・削除して対処済み)。今後`clasp pull`を使う場合は、pull後に同名`.js`が重複生成されていないか必ず確認し、あれば内容を比較の上で`.js`側を削除すること。`clasp push`(ローカル→GAS)はこの問題が起きない。
-- **【重要な注意点】`clasp push`はGASプロジェクトの中身(コード)を更新するだけで、WebApi.gsが提供するWebアプリの「デプロイ」バージョンは更新されない**。`SetupSpreadsheet.gs`・`MigrateOldData.gs`(GASエディタで手動実行する関数群)への変更は`clasp push`だけで即座に有効になるが、`WebApi.gs`(`doGet`/`doPost`)への変更を実際のWebアプリURLに反映するには、これまで通りGASエディタの「デプロイを管理」→既存デプロイを「新しいバージョン」で再デプロイする操作が別途必要(`clasp deploy`コマンドもあるが今回は未使用・未検証)。
-- **今後の運用**: コード変更時は「ローカルの`.gs`を編集→(必要なら)`git commit`&`git push`でGitHubへ反映→`clasp push`でGASへ反映→WebApi.gs変更時のみ追加で手動デプロイ」という流れになる。GASエディタへの手貼り替えは基本的に不要になった。
+- **【重要な注意点】`clasp push`はGASプロジェクトの中身(コード)を更新するだけで、WebApi.gsが提供するWebアプリの「デプロイ」バージョンは更新されない**。`SetupSpreadsheet.gs`・`MigrateOldData.gs`(GASエディタで手動実行する関数群)への変更は`clasp push`だけで即座に有効になるが、`WebApi.gs`(`doGet`/`doPost`)への変更を実際のWebアプリURLに反映するには再デプロイが別途必要。
+- **【2026-09-10確認】Web Appの再デプロイも`clasp deploy`でClaudeがBash経由で実施できる**。本番デプロイID(index.html等の`GAS_URL`定数のURLに使われている方)は`AKfycbygThIm2QVUek5ZSvUIuayfY3nUSmktUggkwZtc_Ezzc1GPA8VudiGAg2GKlHS4gfAI`(もう一つの`@HEAD`表示のデプロイは開発用で無関係)。`clasp deploy -i AKfycbygThIm2QVUek5ZSvUIuayfY3nUSmktUggkwZtc_Ezzc1GPA8VudiGAg2GKlHS4gfAI -d "説明文"`で、URLはそのままバージョンだけ上がる(GASエディタの「新しいバージョンをデプロイ」と同じ効果)。WebApi.gs変更時は、ユーザーに手動デプロイを頼む前にまずこの方法を試すこと。
+- **今後の運用**: コード変更時は「ローカルの`.gs`を編集→(必要なら)`git commit`&`git push`でGitHubへ反映→`clasp push`でGASへ反映→WebApi.gs変更時は上記`clasp deploy`で再デプロイ」という流れになる。GASエディタへの手貼り替え・手動デプロイ操作は基本的に不要になった。
 
 ### ⑭ CC/KP/SK台帳をユーザーが旧システム形式で手作り、年度自動作成の構成を追随(2026-08-15)
 `listAllSheets`(診断用、新設)でスプレッドシートの実際のシート一覧を確認したところ、⑤⑥⑦で「方針未確定のため非表示」としていたCC/KP/SK台帳3シートについて、**ユーザーが独自に(コードを使わず手作業で)旧システム形式の複雑な複数行結合ヘッダー構成へ作り直し、表示状態にしていた**ことが判明。加えて、コードが知らない新規シートが2枚追加されていた。
