@@ -726,6 +726,18 @@ function buildDashboardData_() {
   };
 }
 
+/**
+ * 【診断用・手動実行・2026-09-10】ダッシュボードが「データの取得に失敗しました:
+ * Unexpected token '<', "<!DOCTYPE "... is not valid JSON」というエラーになる report を受けての調査用。
+ * doGet(mode=dashboard)はbuildDashboardData_()の例外をtry/catchしていないため、例外が起きるとGASの
+ * デフォルトのHTMLエラーページが返り、クライアント側でJSONとして解析できずこのエラーになる。
+ * 直接実行して実際のエラー(行番号・メッセージ)を確認する。
+ */
+function debugRunBuildDashboardData() {
+  var result = buildDashboardData_();
+  Logger.log(JSON.stringify(result, null, 2));
+}
+
 /** シートの次の空き行を探す(A列・N列のどちらかが埋まっていればその行は使用済みとみなす) */
 function findNextRow_(sheet) {
   var rowCount = DATA_END_ROW - DATA_START_ROW + 1;
