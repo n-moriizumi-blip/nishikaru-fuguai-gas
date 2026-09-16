@@ -1825,7 +1825,7 @@ function buildCcLedgerSheetV2_(ss, masters, dataLists, sheetName) {
     { header: 'クレーム内容分類', dropdown: itemNames },
     { header: 'クレーム内容詳細' },
     { header: 'NG数' },
-    { header: '納入数' },
+    { header: '納入数（加工数）' },
     { header: '加工者', dropdown: masters.kakosha },
     { header: '機械名', dropdown: masters.kishu },
     { header: '機械番号' },
