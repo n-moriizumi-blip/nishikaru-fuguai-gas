@@ -518,8 +518,12 @@ function readRecordFromRows_(sheet, rows) {
  * lookupRecordForEdit_で見つけた記録を上書きする(2026-08-18新設)。
  * 本人の記録以外は更新できないようサーバー側でも品証担当者を照合する(クライアント側の制御だけに頼らない)。
  * 送信ID(W列)はそのまま維持する(タイムスタンプも新規送信扱いにはせず、元の値を保つ)。
- * 新しい不良項目数が元の行数より多い場合は、直後の行が本当に空いているか確認してから使う
- * (別の記録の行を誤って上書きしないための安全策)。
+ * 新しい不良項目数が元の行数より多い場合は、直後の行が本当に空いているか確認し、
+ * 埋まっていれば(他の記録の行を巻き込まないよう)その位置に必要な行数を挿入して場所を作る
+ * (2026-09-24改訂。以前は空いていない場合エラーで処理を止めていたが、ユーザー指摘により
+ * 行挿入で対応するよう変更。挿入位置から下の行は自動的にずれるが、不良集計等が参照する
+ * 範囲(例:N2:N115)は挿入位置をまたぐ既存の数式ならGoogle Sheets側が自動的に追従するため
+ * 集計への影響は無い。この列挿入と同じ挙動は、列の挿入・移動でこのプロジェクトで既に確認済み)。
  */
 function updateDefectRecord_(body, verifiedName) {
   if (!body.id) throw new Error('編集対象のIDが指定されていません');
@@ -542,13 +546,22 @@ function updateDefectRecord_(body, verifiedName) {
   var items = Array.isArray(body.items) ? body.items : [];
   if (items.length === 0) throw new Error('不良項目が指定されていません');
 
-  // 元の行数より多くの行が必要な場合、直後の行が本当に空いているか確認する(他の記録を巻き込まないため)
+  // 元の行数より多くの行が必要な場合、直後の行が本当に空いているか確認する(他の記録を巻き込まないため)。
+  // 空いていなければ、その位置に不足分の行を挿入して場所を作る(下に続く他の記録は自動的にずれるだけで、
+  // データ自体は保持される)。
   if (items.length > oldRows.length) {
-    for (var r = mainRow + oldRows.length; r < mainRow + items.length; r++) {
-      if (r > DATA_END_ROW) throw new Error(sheetName + ' が満杯です(不良項目の追加行)');
+    var needed = items.length - oldRows.length;
+    var lastOldRow = mainRow + oldRows.length - 1;
+    var maxRows = sheet.getMaxRows();
+    var hasRoomInPlace = true;
+    for (var r = lastOldRow + 1; r <= lastOldRow + needed; r++) {
+      if (r > maxRows) { hasRoomInPlace = false; break; }
       var check = sheet.getRange(r, 1, 1, 14).getValues()[0];
       var hasData = check[0] !== '' || check[13] !== ''; // A列(タイムスタンプ) or N列(不良項目)
-      if (hasData) throw new Error('不良項目を増やすための空き行が見つかりませんでした。項目数を減らすか、直接シートを編集してください。');
+      if (hasData) { hasRoomInPlace = false; break; }
+    }
+    if (!hasRoomInPlace) {
+      sheet.insertRowsAfter(lastOldRow, needed);
     }
   }
 
