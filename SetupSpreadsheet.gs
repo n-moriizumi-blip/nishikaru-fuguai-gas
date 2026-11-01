@@ -1171,6 +1171,76 @@ function addCcClaimCategoryValidation() {
 }
 
 /**
+ * 見出し行(固定行)から、指定した見出し文字列の列番号を動的に求める(完全一致優先、無ければ部分一致、
+ * 装飾用の空白は除去してから判定)。resolveCcLedgerColumns_のfindColを汎用化したもの(2026-11-01新設、
+ * KP・SK台帳のプルダウン再適用でも使うため)。見つからなければ-1。
+ */
+function findLedgerHeaderColumn_(sheet, name) {
+  var frozen = sheet.getFrozenRows() || 1;
+  var lastCol = sheet.getLastColumn();
+  var headerRows = sheet.getRange(1, 1, frozen, lastCol).getValues();
+  var partialMatchCol = -1;
+  for (var r = 0; r < headerRows.length; r++) {
+    for (var c = 0; c < headerRows[r].length; c++) {
+      var text = (headerRows[r][c] || '').toString().replace(/[\s　]+/g, '');
+      if (text === name) return c + 1;
+      if (partialMatchCol === -1 && text.indexOf(name) !== -1) partialMatchCol = c + 1;
+    }
+  }
+  return partialMatchCol;
+}
+
+/**
+ * 【1回だけ手動実行・2026-11-01】「社内不良管理台帳(品証)(KP)」のクレーム内容分類列に、
+ * 現在のDEFECT_ITEMSの項目名からなるプルダウンを再適用する(キズ系の「キズ」削除等、
+ * マスタ変更のたびに手動実行する想定。addCcClaimCategoryValidationのKP版)。
+ */
+function addKpCategoryValidation() {
+  var ss = getCurrentYearSpreadsheet_();
+  var sheetName = '社内不良管理台帳(品証)(KP)';
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('「' + sheetName + '」シートが見つかりません');
+
+  var categoryCol = findLedgerHeaderColumn_(sheet, 'クレーム内容分類');
+  if (categoryCol === -1) throw new Error('「クレーム内容分類」列が見つかりません');
+
+  var itemNames = DEFECT_ITEMS.map(function (item) { return item.name; });
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(itemNames, true)
+    .setAllowInvalid(true)
+    .build();
+  var dataStartRow = sheet.getFrozenRows() + 1;
+  var rows = 150; // 台帳の伸びしろとして150行分
+  sheet.getRange(dataStartRow, categoryCol, rows, 1).setDataValidation(rule);
+  Logger.log('「' + sheetName + '」' + columnToLetter_(categoryCol) + '列(' +
+    dataStartRow + '〜' + (dataStartRow + rows - 1) + '行目)にプルダウンを再適用しました。');
+}
+
+/**
+ * 【1回だけ手動実行・2026-11-01】「社内不良管理台帳(製造工程)(SK)」の不良層別区分列に、
+ * 現在のDEFECT_ITEMSの項目名からなるプルダウンを再適用する(addCcClaimCategoryValidationのSK版)。
+ */
+function addSkCategoryValidation() {
+  var ss = getCurrentYearSpreadsheet_();
+  var sheet = ss.getSheetByName(SK_LEDGER_SHEET_NAME);
+  if (!sheet) throw new Error('「' + SK_LEDGER_SHEET_NAME + '」シートが見つかりません');
+
+  var categoryCol = findLedgerHeaderColumn_(sheet, '不良層別区分');
+  if (categoryCol === -1) throw new Error('「不良層別区分」列が見つかりません');
+
+  var itemNames = DEFECT_ITEMS.map(function (item) { return item.name; });
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(itemNames, true)
+    .setAllowInvalid(true)
+    .build();
+  var dataStartRow = sheet.getFrozenRows() + 1;
+  var rows = 150; // 台帳の伸びしろとして150行分
+  sheet.getRange(dataStartRow, categoryCol, rows, 1).setDataValidation(rule);
+  Logger.log('「' + SK_LEDGER_SHEET_NAME + '」' + columnToLetter_(categoryCol) + '列(' +
+    dataStartRow + '〜' + (dataStartRow + rows - 1) + '行目)にプルダウンを再適用しました。');
+}
+
+/**
  * 【1回だけ手動実行】「社内不良管理台帳(製造工程)(SK)」のC列(発生日(品質会議開催日))に、
  * CC/KP台帳と同じ日付の入力規則(カレンダーアイコンから選択可能)・表示形式を設定する(2026-08-17新設)。
  * debugInspectDateColumnValidation(MigrateOldData.gs)の実機調査で、この列だけ入力規則が無く
